@@ -1,5 +1,4 @@
 import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
-import { VRButton } from 'https://unpkg.com/three@0.161.0/examples/jsm/webxr/VRButton.js';
 import { XRHandModelFactory } from 'https://unpkg.com/three@0.161.0/examples/jsm/webxr/XRHandModelFactory.js';
 
 const container = document.getElementById('app') || document.body;
@@ -20,17 +19,105 @@ if (container.classList) {
   container.classList.add('is-ready');
 }
 
-const vrButton = VRButton.createButton(renderer, {
-  optionalFeatures: ['hand-tracking'],
-  requiredFeatures: ['local-floor']
-});
-vrButton.classList.add('vr-entry-button');
-vrButton.style.position = 'absolute';
-vrButton.style.left = '50%';
-vrButton.style.bottom = '50%';
-vrButton.style.transform = 'translate(-50%, 50%)';
-vrButton.style.zIndex = '10';
-container.appendChild(vrButton);
+const introScreen = document.createElement('div');
+introScreen.className = 'intro-screen';
+
+const introCard = document.createElement('div');
+introCard.className = 'intro-card';
+
+const introTitle = document.createElement('h1');
+introTitle.textContent = 'VRTOR Lightspace';
+
+const introSubtitle = document.createElement('p');
+introSubtitle.className = 'intro-subtitle';
+introSubtitle.textContent = 'Step inside to explore the holographic room.';
+
+const enterButton = document.createElement('button');
+enterButton.type = 'button';
+enterButton.className = 'enter-vr-button';
+enterButton.textContent = 'Enter VR';
+enterButton.disabled = true;
+
+const introStatus = document.createElement('p');
+introStatus.className = 'intro-status';
+introStatus.textContent = 'Checking headset availability…';
+
+introCard.append(introTitle, introSubtitle, enterButton, introStatus);
+introScreen.appendChild(introCard);
+container.appendChild(introScreen);
+
+let activeSession = null;
+
+function resetIntro(message, buttonLabel = 'Enter VR') {
+  introScreen.classList.remove('is-hidden');
+  introStatus.textContent = message;
+  enterButton.textContent = buttonLabel;
+  enterButton.disabled = false;
+}
+
+function showError(message) {
+  introStatus.textContent = message;
+  enterButton.disabled = false;
+}
+
+async function beginSession() {
+  if (activeSession) {
+    introStatus.textContent = 'You are already in an active VR session.';
+    return;
+  }
+
+  if (!navigator.xr) {
+    showError('WebXR is not available in this browser.');
+    return;
+  }
+
+  enterButton.disabled = true;
+  introStatus.textContent = 'Requesting immersive session…';
+
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      requiredFeatures: ['local-floor'],
+      optionalFeatures: ['hand-tracking']
+    });
+
+    activeSession = session;
+
+    session.addEventListener('end', () => {
+      activeSession = null;
+      resetIntro('Take a breather, then jump back in.');
+    });
+
+    await renderer.xr.setSession(session);
+    introScreen.classList.add('is-hidden');
+  } catch (error) {
+    console.error('Failed to start XR session', error);
+    showError('Unable to start VR session. Please try again.');
+  }
+}
+
+enterButton.addEventListener('click', beginSession);
+
+if (!navigator.xr) {
+  introStatus.textContent = 'WebXR is not supported on this device.';
+  enterButton.textContent = 'Unsupported';
+  enterButton.disabled = true;
+} else {
+  navigator.xr.isSessionSupported('immersive-vr')
+    .then((supported) => {
+      if (supported) {
+        introStatus.textContent = 'Ready when you are.';
+        enterButton.disabled = false;
+      } else {
+        introStatus.textContent = 'Immersive VR is not supported.';
+        enterButton.textContent = 'Unavailable';
+        enterButton.disabled = true;
+      }
+    })
+    .catch((error) => {
+      console.error('Failed to determine XR support', error);
+      showError('Could not verify VR support.');
+    });
+}
 
 const ambient = new THREE.HemisphereLight(0xffffff, 0x0a0d12, 0.6);
 scene.add(ambient);

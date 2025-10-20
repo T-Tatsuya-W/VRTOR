@@ -5,7 +5,7 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at top, #1f2933, #111827);
+  background: radial-gradient(circle at top, #101623, #080c16 55%);
   color: #f9fafb;
   min-height: 100vh;
   overflow: hidden;
@@ -14,51 +14,92 @@ body {
 #app {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-#app::after {
-  content: 'Enable VR to enter the scene';
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.35;
-  font-size: 0.75rem;
-  pointer-events: none;
-}
-
-#app.is-ready::after {
-  content: none;
+  display: grid;
+  place-items: center;
 }
 
 canvas {
   display: block;
 }
 
-.vr-entry-button {
-  padding: 1rem 1.75rem;
+.intro-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: radial-gradient(circle at top, rgba(20, 29, 45, 0.92), rgba(4, 6, 12, 0.92));
+  backdrop-filter: blur(14px);
+  transition: opacity 220ms ease;
+  z-index: 12;
+}
+
+.intro-screen.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.intro-card {
+  width: min(360px, 100%);
+  padding: 2.25rem 2rem;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(30, 58, 138, 0.85), rgba(14, 165, 233, 0.55));
+  box-shadow: 0 24px 80px rgba(37, 99, 235, 0.4);
+  text-align: center;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.intro-card h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.15rem);
+  letter-spacing: 0.04em;
+}
+
+.intro-subtitle {
+  margin: 0;
+  font-size: 1rem;
+  color: rgba(226, 244, 255, 0.85);
+}
+
+.enter-vr-button {
+  padding: 0.95rem 1.75rem;
   font-size: 1rem;
   border-radius: 999px;
   border: none;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  background: linear-gradient(135deg, #60a5fa, #e0f2fe);
+  background: linear-gradient(135deg, #f8fafc, #bae6fd);
   color: #0b1220;
-  box-shadow: 0 18px 45px rgba(96, 165, 250, 0.35);
+  box-shadow: 0 18px 38px rgba(190, 230, 255, 0.45);
   cursor: pointer;
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
 }
 
-.vr-entry-button:hover,
-.vr-entry-button:focus-visible {
-  transform: translate(-50%, 50%) scale(1.05);
-  box-shadow: 0 24px 60px rgba(96, 165, 250, 0.45);
+.enter-vr-button:hover,
+.enter-vr-button:focus-visible {
+  transform: translateY(-2px) scale(1.015);
+  box-shadow: 0 24px 52px rgba(190, 230, 255, 0.55);
   outline: none;
 }
 
-.vr-entry-button:active {
-  transform: translate(-50%, 50%) scale(0.97);
-  box-shadow: 0 12px 30px rgba(96, 165, 250, 0.4);
+.enter-vr-button:active {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 12px 28px rgba(190, 230, 255, 0.45);
+}
+
+.enter-vr-button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.3);
+  box-shadow: none;
+}
+
+.intro-status {
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(15, 23, 42, 0.85);
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.72);
 }
