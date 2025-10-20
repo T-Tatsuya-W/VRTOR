@@ -1,0 +1,36 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #1f2933, #111827);
+  color: #f9fafb;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#app::after {
+  content: 'Enable VR to enter the scene';
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.35;
+  font-size: 0.75rem;
+}
+
+#app.is-ready::after {
+  content: none;
+}
+
+canvas {
+  display: block;
+}
