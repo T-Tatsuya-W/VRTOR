@@ -24,9 +24,12 @@ const vrButton = VRButton.createButton(renderer, {
   optionalFeatures: ['hand-tracking'],
   requiredFeatures: ['local-floor']
 });
+vrButton.classList.add('vr-entry-button');
 vrButton.style.position = 'absolute';
-vrButton.style.left = '24px';
-vrButton.style.bottom = '24px';
+vrButton.style.left = '50%';
+vrButton.style.bottom = '50%';
+vrButton.style.transform = 'translate(-50%, 50%)';
+vrButton.style.zIndex = '10';
 container.appendChild(vrButton);
 
 const ambient = new THREE.HemisphereLight(0xffffff, 0x0a0d12, 0.6);
