@@ -1,16 +1,181 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Quest VR Scene</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <main id="loading">
-      <h1>Loading immersive scene…</h1>
-      <p>Put on your headset and press the Enter VR button to begin.</p>
-    </main>
-    <script type="module" src="./src/main.js"></script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quest 3 – WebXR Hand Tracking Demo</title>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #enter { position: absolute; top: 12px; left: 12px; z-index: 10; }
+    .fallback { position: absolute; right: 12px; top: 12px; background: rgba(0,0,0,0.6); color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="enter"></div>
+  <div class="fallback">Tip: On desktop, drag to look around. On Quest 3, tap "Enter VR" and enable hand tracking.</div>
+
+  <script type="module">
+    // --- Minimal Three.js + WebXR Hand Tracking Demo ---
+    import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+    import { OrbitControls } from 'https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js';
+    import { XRButton } from 'https://unpkg.com/three@0.161.0/examples/jsm/webxr/XRButton.js';
+    import { XRHandModelFactory } from 'https://unpkg.com/three@0.161.0/examples/jsm/webxr/XRHandModelFactory.js';
+
+    // Scene basics
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x101218);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
+    camera.position.set(0, 1.6, 3);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType('local-floor');
+    document.body.appendChild(renderer.domElement);
+
+    // Enter VR button with hand-tracking optional feature
+    const xrButton = XRButton.createButton(renderer, {
+      requiredFeatures: ['local-floor'],
+      optionalFeatures: ['hand-tracking']
+    });
+    document.getElementById('enter').appendChild(xrButton);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(1, 2, 1);
+    scene.add(dir);
+
+    // Ground grid (lightweight visual cue)
+    const grid = new THREE.GridHelper(10, 20, 0x333333, 0x222222);
+    grid.position.y = 0;
+    scene.add(grid);
+
+    // Floating cubes
+    const cubes = new THREE.Group();
+    scene.add(cubes);
+    const cubeGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+    const cubeMat = new THREE.MeshStandardMaterial({ color: 0x66aaff, metalness: 0.1, roughness: 0.6 });
+    for (let i = 0; i < 30; i++) {
+      const m = cubeMat.clone();
+      const mesh = new THREE.Mesh(cubeGeo, m);
+      mesh.position.set((Math.random() - 0.5) * 4, 1 + Math.random() * 1.5, (Math.random() - 0.5) * 4);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+      mesh.userData.baseY = mesh.position.y;
+      mesh.userData.phase = Math.random() * Math.PI * 2;
+      cubes.add(mesh);
+    }
+
+    // Orbit controls for non‑VR preview
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 1.5, 0);
+    controls.enableDamping = true;
+
+    // Hands (spheres model: very light)
+    const handFactory = new XRHandModelFactory();
+    const leftHand = renderer.xr.getHand(0);
+    leftHand.add(handFactory.createHandModel(leftHand, 'spheres'));
+    leftHand.userData.which = 'L';
+    scene.add(leftHand);
+
+    const rightHand = renderer.xr.getHand(1);
+    rightHand.add(handFactory.createHandModel(rightHand, 'spheres'));
+    rightHand.userData.which = 'R';
+    scene.add(rightHand);
+
+    // Text panel (canvas texture) to log hand data
+    const logCanvas = document.createElement('canvas');
+    logCanvas.width = 768; // higher res for crisp text
+    logCanvas.height = 384;
+    const ctx = logCanvas.getContext('2d');
+
+    const logTex = new THREE.CanvasTexture(logCanvas);
+    logTex.minFilter = THREE.LinearFilter;
+
+    const logMat = new THREE.MeshBasicMaterial({ map: logTex, transparent: true });
+    const logPanel = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.6), logMat);
+    logPanel.position.set(0, 1.6, -1.2);
+    scene.add(logPanel);
+
+    function writeLog(lines) {
+      ctx.clearRect(0, 0, logCanvas.width, logCanvas.height);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, logCanvas.width, logCanvas.height);
+      ctx.fillStyle = '#00ffcc';
+      ctx.font = '28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+      let y = 40;
+      for (const line of lines) {
+        ctx.fillText(line, 20, y);
+        y += 36;
+      }
+      logTex.needsUpdate = true;
+    }
+
+    function formatVec3(v) {
+      return `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`;
+    }
+
+    // Utility: simple pinch detection using thumb + index distance
+    function getPinchState(hand) {
+      const thumb = hand.joints && hand.joints['thumb-tip'];
+      const index = hand.joints && hand.joints['index-finger-tip'];
+      if (!thumb || !index) return { active: false, dist: NaN };
+      const dist = thumb.position.distanceTo(index.position);
+      return { active: dist < 0.03, dist };
+    }
+
+    // Animate
+    const clock = new THREE.Clock();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+
+      // Float cubes
+      for (const m of cubes.children) {
+        m.rotation.y += 0.01;
+        m.position.y = m.userData.baseY + Math.sin(t * 0.8 + m.userData.phase) * 0.08;
+      }
+
+      controls.update();
+
+      // Collect hand data (if in an XR session, hands become visible when tracked)
+      const lines = [
+        'WebXR Hand Log',
+        '—',
+      ];
+
+      [leftHand, rightHand].forEach((hand) => {
+        const label = hand.userData.which;
+        const wrist = hand.joints && hand.joints['wrist'];
+        const indexTip = hand.joints && hand.joints['index-finger-tip'];
+        const thumbTip = hand.joints && hand.joints['thumb-tip'];
+        const pinch = getPinchState(hand);
+
+        if (hand.visible && wrist && indexTip && thumbTip) {
+          lines.push(
+            `${label} visible: wrist(${formatVec3(wrist.position)})`,
+            `${label} index tip: (${formatVec3(indexTip.position)})`,
+            `${label} thumb tip: (${formatVec3(thumbTip.position)})`,
+            `${label} pinch: ${pinch.active ? 'YES' : 'no'} (dist ${isNaN(pinch.dist) ? '—' : pinch.dist.toFixed(3)})`
+          );
+        } else {
+          lines.push(`${label} not tracked`);
+        }
+      });
+
+      writeLog(lines);
+      renderer.render(scene, camera);
+    });
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+  </script>
+</body>
 </html>
