@@ -248,6 +248,7 @@ class LogPanel {
     this.material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.material);
     this.lines = [];
+    this.highlighted = false;
     this.render();
   }
 
@@ -266,11 +267,23 @@ class LogPanel {
     this.render();
   }
 
+  setHighlighted(highlighted) {
+    if (this.highlighted === highlighted) return;
+    this.highlighted = highlighted;
+    this.render();
+  }
+
   render() {
     const { ctx } = this;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+    ctx.fillStyle = this.highlighted ? 'rgba(0, 32, 42, 0.82)' : 'rgba(0, 0, 0, 0.68)';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    if (this.highlighted) {
+      ctx.strokeStyle = 'rgba(0, 255, 204, 0.85)';
+      ctx.lineWidth = 12;
+      ctx.strokeRect(6, 6, this.canvas.width - 12, this.canvas.height - 12);
+    }
 
     ctx.fillStyle = '#00ffcc';
     ctx.font = '600 34px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
@@ -291,14 +304,114 @@ class LogPanel {
   }
 }
 
-function updateOrbiterPosition(object, time) {
-  const radius = object.userData.orbitRadius ?? 0.55;
-  const speed = object.userData.orbitSpeed ?? 0.3;
-  const angle = object.userData.baseAngle + time * speed;
-  const heightPhase = object.userData.heightPhase ?? 0;
-  const bobAmplitude = object.userData.bobAmplitude ?? 0.1;
-  const height = Math.sin(time * 1.6 + heightPhase) * bobAmplitude;
-  object.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
+class DoubleGrabController {
+  constructor(group, options = {}) {
+    this.group = group;
+    this.options = {
+      proximity: 0.25,
+      minScale: 0.35,
+      maxScale: 3.5,
+      onReadyChange: null,
+      ...options
+    };
+
+    this.bounds = new THREE.Box3();
+    this.engaged = false;
+    this.ready = false;
+    this.initial = {
+      midpoint: new THREE.Vector3(),
+      offset: new THREE.Vector3(),
+      direction: new THREE.Vector3(1, 0, 0),
+      distance: 0.3,
+      quaternion: new THREE.Quaternion(),
+      scale: 1
+    };
+    this.temp = {
+      midpoint: new THREE.Vector3(),
+      span: new THREE.Vector3(),
+      direction: new THREE.Vector3(),
+      rotationDelta: new THREE.Quaternion(),
+      workingQuaternion: new THREE.Quaternion(),
+      nextPosition: new THREE.Vector3()
+    };
+  }
+
+  update(leftState, rightState) {
+    const leftWrist = leftState?.wrist ?? null;
+    const rightWrist = rightState?.wrist ?? null;
+
+    this.group.updateWorldMatrix(true, true);
+    this.bounds.setFromObject(this.group);
+
+    const leftReady = Boolean(
+      leftState?.visible &&
+        leftWrist &&
+        this.bounds.distanceToPoint(leftWrist) <= this.options.proximity
+    );
+    const rightReady = Boolean(
+      rightState?.visible &&
+        rightWrist &&
+        this.bounds.distanceToPoint(rightWrist) <= this.options.proximity
+    );
+
+    const ready = leftReady && rightReady;
+    if (ready !== this.ready) {
+      this.ready = ready;
+      if (typeof this.options.onReadyChange === 'function') {
+        this.options.onReadyChange(ready);
+      }
+    }
+
+    const grabbing = Boolean(ready && leftState?.grab && rightState?.grab && leftWrist && rightWrist);
+    if (!grabbing) {
+      this.engaged = false;
+      return { ready, grabbing: false };
+    }
+
+    const midpoint = this.temp.midpoint.copy(leftWrist).add(rightWrist).multiplyScalar(0.5);
+    const spanVector = this.temp.span.copy(rightWrist).sub(leftWrist);
+    const spanLength = spanVector.length();
+    const hasSpan = spanLength > 1e-4;
+
+    if (!this.engaged) {
+      this.engaged = true;
+      this.initial.midpoint.copy(midpoint);
+      this.initial.offset.copy(this.group.position).sub(midpoint);
+      if (hasSpan) {
+        this.initial.direction.copy(this.temp.direction.copy(spanVector).normalize());
+        this.initial.distance = spanLength;
+      } else {
+        this.initial.direction.set(1, 0, 0);
+        this.initial.distance = 0.3;
+      }
+      this.initial.quaternion.copy(this.group.quaternion);
+      this.initial.scale = this.group.scale.x;
+    } else {
+      if (hasSpan) {
+        const direction = this.temp.direction.copy(spanVector).normalize();
+        const rotationDelta = this.temp.rotationDelta.setFromUnitVectors(
+          this.initial.direction,
+          direction
+        );
+        const rotated = this.temp.workingQuaternion.copy(this.initial.quaternion);
+        rotated.premultiply(rotationDelta);
+        this.group.quaternion.copy(rotated);
+
+        const relativeScale = spanLength / Math.max(this.initial.distance, 0.1);
+        const clampedScale = THREE.MathUtils.clamp(
+          this.initial.scale * relativeScale,
+          this.options.minScale,
+          this.options.maxScale
+        );
+        this.group.scale.setScalar(clampedScale);
+      }
+
+      const newPosition = this.temp.nextPosition.copy(midpoint).add(this.initial.offset);
+      this.group.position.copy(newPosition);
+    }
+
+    return { ready, grabbing: true };
+  }
 }
 
 const scene = new THREE.Scene();
@@ -346,66 +459,17 @@ torus.position.set(0, 1.5, 0);
 torus.rotation.x = Math.PI / 2;
 scene.add(torus);
 
-const orbiterGroup = new THREE.Group();
-orbiterGroup.position.set(0, 1.5, 0);
-scene.add(orbiterGroup);
-
-function addOrbiter(object, config = {}) {
-  Object.assign(object.userData, config);
-  updateOrbiterPosition(object, 0);
-  orbiterGroup.add(object);
-}
-
-const pyramidGeo = new THREE.TetrahedronGeometry(0.1);
-const pyramidMat = new THREE.MeshStandardMaterial({
-  color: 0xffc857,
-  metalness: 0.2,
-  roughness: 0.4,
-  flatShading: true
+const torusLabel = createLabelSprite('XR LOGS', {
+  width: 0.42,
+  fontSize: 140,
+  color: '#f1f6ff',
+  strokeStyle: 'rgba(0, 0, 0, 0.5)',
+  renderOrder: 15,
+  depthTest: false
 });
-
-const ORBITER_LABELS = ['Access', 'Sync', 'Link', 'Pulse'];
-const ORBITER_TOTAL = 12;
-let labelIndex = 0;
-
-for (let i = 0; i < ORBITER_TOTAL; i++) {
-  const baseAngle = (i / ORBITER_TOTAL) * Math.PI * 2;
-  const heightPhase = Math.random() * Math.PI * 2;
-  const orbitSpeed = 0.25 + Math.random() * 0.25;
-  const bobAmplitude = 0.08 + Math.random() * 0.04;
-
-  const config = { baseAngle, heightPhase, orbitSpeed, bobAmplitude };
-  const shouldUseLabel = i % 3 === 2 && labelIndex < ORBITER_LABELS.length;
-
-  if (shouldUseLabel) {
-    const label = createLabelSprite(ORBITER_LABELS[labelIndex++], {
-      width: 0.35,
-      fontSize: 110,
-      renderOrder: 20,
-      depthTest: false
-    });
-    addOrbiter(label, config);
-  } else {
-    const pyramid = new THREE.Mesh(pyramidGeo, pyramidMat.clone());
-    const spinSpeed = 0.5 + Math.random() * 0.6;
-    pyramid.rotation.x = Math.PI / 3;
-    addOrbiter(pyramid, { ...config, spinSpeed });
-  }
-}
-
-const cubes = new THREE.Group();
-scene.add(cubes);
-const cubeGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
-const cubeMat = new THREE.MeshStandardMaterial({ color: 0x66aaff, metalness: 0.1, roughness: 0.6 });
-for (let i = 0; i < 30; i++) {
-  const m = cubeMat.clone();
-  const mesh = new THREE.Mesh(cubeGeo, m);
-  mesh.position.set((Math.random() - 0.5) * 4, 1 + Math.random() * 1.5, (Math.random() - 0.5) * 4);
-  mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
-  mesh.userData.baseY = mesh.position.y;
-  mesh.userData.phase = Math.random() * Math.PI * 2;
-  cubes.add(mesh);
-}
+torusLabel.position.set(0, 0.02, 0);
+torusLabel.material.depthTest = false;
+torus.add(torusLabel);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 1.5, 0);
@@ -469,37 +533,94 @@ window.addEventListener('error', (e) => {
   systemMessages.splice(12);
 });
 
-const logRigManipulator = {
-  engaged: false,
-  initial: {
-    midpoint: new THREE.Vector3(),
-    offset: new THREE.Vector3(),
-    direction: new THREE.Vector3(1, 0, 0),
-    distance: 0.4,
-    quaternion: new THREE.Quaternion(),
-    scale: 1
+const logRigController = new DoubleGrabController(logRig, {
+  onReadyChange: (ready) => {
+    [leftLogPanel, rightLogPanel, systemLogPanel].forEach((panel) => panel.setHighlighted(ready));
   }
+});
+
+const controlRig = new THREE.Group();
+controlRig.position.set(-0.9, 1.25, -1.05);
+controlRig.rotation.y = Math.PI / 8;
+scene.add(controlRig);
+
+const controlPanelMaterial = new THREE.MeshStandardMaterial({
+  color: 0x0c1f2b,
+  emissive: 0x062b3f,
+  emissiveIntensity: 0.35,
+  metalness: 0.2,
+  roughness: 0.65,
+  transparent: true,
+  opacity: 0.9,
+  side: THREE.DoubleSide
+});
+const controlPanel = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 0.42), controlPanelMaterial);
+controlPanel.position.set(0, 0, 0);
+controlRig.add(controlPanel);
+
+const controlPanelFrame = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.72, 0.46),
+  new THREE.MeshBasicMaterial({ color: 0x031018, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+);
+controlPanelFrame.position.set(0, 0, -0.01);
+controlRig.add(controlPanelFrame);
+
+const controlButtonMaterial = new THREE.MeshStandardMaterial({
+  color: 0x3ab0ff,
+  emissive: 0x001c38,
+  emissiveIntensity: 0.45,
+  metalness: 0.45,
+  roughness: 0.4
+});
+const controlButton = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.2), controlButtonMaterial);
+controlButton.position.set(0, -0.02, 0.09);
+controlRig.add(controlButton);
+
+const controlButtonLabel = createLabelSprite('Log Action', {
+  width: 0.36,
+  fontSize: 120,
+  color: '#fffbf5',
+  strokeStyle: 'rgba(0, 0, 0, 0.55)',
+  renderOrder: 25,
+  depthTest: false
+});
+controlButtonLabel.position.set(0, 0.16, 0.12);
+controlButtonLabel.material.depthTest = false;
+controlRig.add(controlButtonLabel);
+
+const controlButtonState = {
+  baseColor: new THREE.Color(0x3ab0ff),
+  activeColor: new THREE.Color(0xff7f9e),
+  cooldown: 0,
+  pressed: false,
+  restZ: controlButton.position.z,
+  maxPressDepth: 0.035,
+  ready: false
 };
+const controlButtonCenter = new THREE.Vector3();
+const CONTROL_BUTTON_BASE_RADIUS = 0.16;
+
+const controlRigController = new DoubleGrabController(controlRig, {
+  minScale: 0.45,
+  maxScale: 2.5,
+  onReadyChange: (ready) => {
+    controlPanelMaterial.emissiveIntensity = ready ? 0.9 : 0.35;
+    controlButtonState.ready = ready;
+  }
+});
+
+function handPressesControlButton(handState) {
+  if (!handState?.visible || !handState?.wrist) return false;
+  if (!handState.grab) return false;
+  const scaledRadius = CONTROL_BUTTON_BASE_RADIUS * controlRig.scale.x;
+  return handState.wrist.distanceTo(controlButtonCenter) <= scaledRadius;
+}
 
 const clock = new THREE.Clock();
 
 renderer.setAnimationLoop(() => {
   const delta = clock.getDelta();
   const elapsed = clock.getElapsedTime();
-
-  const t = elapsed;
-  for (const m of cubes.children) {
-    m.rotation.y += 0.01;
-    m.position.y = m.userData.baseY + Math.sin(t * 0.8 + m.userData.phase) * 0.08;
-  }
-
-  orbiterGroup.children.forEach((child) => {
-    updateOrbiterPosition(child, elapsed);
-    if (child.isMesh) {
-      child.rotation.y += delta * (child.userData.spinSpeed ?? 0);
-      child.rotation.x += delta * 0.4;
-    }
-  });
 
   controls.update();
 
@@ -508,63 +629,32 @@ renderer.setAnimationLoop(() => {
   const [leftTracker, rightTracker] = trackers;
   const leftState = leftTracker.state;
   const rightState = rightTracker.state;
-  const leftWrist = leftState.wrist;
-  const rightWrist = rightState.wrist;
+  const logRigStatus = logRigController.update(leftState, rightState);
+  const controlRigStatus = controlRigController.update(leftState, rightState);
 
-  const bothGrabbing = Boolean(
-    leftState.visible &&
-      rightState.visible &&
-      leftState.grab &&
-      rightState.grab &&
-      leftWrist &&
-      rightWrist
-  );
+  controlButton.getWorldPosition(controlButtonCenter);
+  const buttonPressedNow = handPressesControlButton(leftState) || handPressesControlButton(rightState);
 
-  if (bothGrabbing) {
-    const midpoint = new THREE.Vector3().addVectors(leftWrist, rightWrist).multiplyScalar(0.5);
-    const spanVector = new THREE.Vector3().subVectors(rightWrist, leftWrist);
-    const spanLength = spanVector.length();
-    const hasSpan = spanLength > 1e-4;
-
-    if (!logRigManipulator.engaged) {
-      logRigManipulator.engaged = true;
-      logRigManipulator.initial.midpoint.copy(midpoint);
-      logRigManipulator.initial.offset.copy(logRig.position).sub(midpoint);
-      if (hasSpan) {
-        logRigManipulator.initial.direction.copy(spanVector.clone().normalize());
-        logRigManipulator.initial.distance = spanLength;
-      } else {
-        logRigManipulator.initial.direction.set(1, 0, 0);
-        logRigManipulator.initial.distance = 0.3;
-      }
-      logRigManipulator.initial.quaternion.copy(logRig.quaternion);
-      logRigManipulator.initial.scale = logRig.scale.x;
-    } else {
-      if (hasSpan) {
-        const direction = spanVector.clone().normalize();
-        const rotationDelta = new THREE.Quaternion().setFromUnitVectors(
-          logRigManipulator.initial.direction,
-          direction
-        );
-        const rotated = logRigManipulator.initial.quaternion.clone();
-        rotated.premultiply(rotationDelta);
-        logRig.quaternion.copy(rotated);
-
-        const relativeScale = spanLength / Math.max(logRigManipulator.initial.distance, 0.1);
-        const clampedScale = THREE.MathUtils.clamp(
-          logRigManipulator.initial.scale * relativeScale,
-          0.35,
-          3.5
-        );
-        logRig.scale.setScalar(clampedScale);
-      }
-
-      const newPosition = midpoint.clone().add(logRigManipulator.initial.offset);
-      logRig.position.copy(newPosition);
+  if (buttonPressedNow) {
+    if (!controlButtonState.pressed) {
+      controlButtonState.pressed = true;
+      systemMessages.unshift('Control button pressed');
+      systemMessages.splice(12);
     }
+    controlButtonState.cooldown = 0.25;
   } else {
-    logRigManipulator.engaged = false;
+    controlButtonState.pressed = false;
+    controlButtonState.cooldown = Math.max(controlButtonState.cooldown - delta, 0);
   }
+
+  const activationStrength = THREE.MathUtils.clamp(controlButtonState.cooldown / 0.25, 0, 1);
+  controlButtonMaterial.color
+    .copy(controlButtonState.baseColor)
+    .lerp(controlButtonState.activeColor, activationStrength);
+  const emissiveBase = controlButtonState.ready ? 0.6 : 0.35;
+  controlButtonMaterial.emissiveIntensity = emissiveBase + activationStrength * 0.65;
+  controlButton.position.z = controlButtonState.restZ - activationStrength * controlButtonState.maxPressDepth;
+  controlButtonLabel.material.opacity = 0.85 + activationStrength * 0.15;
 
   leftLogPanel.setLines(leftTracker.getLogLines());
   rightLogPanel.setLines(rightTracker.getLogLines());
@@ -581,8 +671,15 @@ renderer.setAnimationLoop(() => {
     });
   }
 
-  if (bothGrabbing) {
-    generalLines.push('—', 'Adjusting log cluster…', `Scale ×${logRig.scale.x.toFixed(2)}`);
+  const statusLines = [];
+  if (logRigStatus.grabbing) {
+    statusLines.push('Adjusting log cluster…', `Scale ×${logRig.scale.x.toFixed(2)}`);
+  }
+  if (controlRigStatus.grabbing) {
+    statusLines.push('Moving control panel…');
+  }
+  if (statusLines.length > 0) {
+    generalLines.push('—', ...statusLines);
   }
 
   if (systemMessages.length) {
