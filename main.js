@@ -396,13 +396,14 @@ class DoubleGrabController {
       minScale: 0.35,
       maxScale: 3.5,
       onReadyChange: null,
+      intersectionPadding: 0.01,
       ...options
     };
 
     this.bounds = new THREE.Box3();
-    this.expandedBounds = new THREE.Box3();
+    this.intersectionBounds = new THREE.Box3();
     this.engaged = false;
-    this.ready = false;
+    this.highlighted = false;
     this.initial = {
       midpoint: new THREE.Vector3(),
       offset: new THREE.Vector3(),
@@ -421,45 +422,59 @@ class DoubleGrabController {
     };
   }
 
+  setHighlight(value) {
+    if (this.highlighted === value) return;
+    this.highlighted = value;
+    if (typeof this.options.onReadyChange === 'function') {
+      this.options.onReadyChange(value);
+    }
+  }
+
+  release() {
+    if (this.engaged && DoubleGrabController.activeController === this) {
+      DoubleGrabController.activeController = null;
+    }
+    this.engaged = false;
+    this.setHighlight(false);
+  }
+
   update(leftState, rightState) {
     const leftWrist = leftState?.wrist ?? null;
     const rightWrist = rightState?.wrist ?? null;
 
     this.group.updateWorldMatrix(true, true);
     this.bounds.setFromObject(this.group);
-    this.expandedBounds.copy(this.bounds).expandByScalar(this.options.proximity);
+    const padding = Math.max(0, this.options.intersectionPadding ?? 0);
+    this.intersectionBounds.copy(this.bounds).expandByScalar(padding);
 
-    const leftReady = Boolean(
-      leftState?.visible && leftWrist && this.expandedBounds.containsPoint(leftWrist)
+    const blockedByOther =
+      DoubleGrabController.activeController && DoubleGrabController.activeController !== this;
+
+    const leftInside = Boolean(
+      !blockedByOther &&
+        leftState?.visible &&
+        leftWrist &&
+        this.intersectionBounds.containsPoint(leftWrist)
     );
-    const rightReady = Boolean(
-      rightState?.visible && rightWrist && this.expandedBounds.containsPoint(rightWrist)
+    const rightInside = Boolean(
+      !blockedByOther &&
+        rightState?.visible &&
+        rightWrist &&
+        this.intersectionBounds.containsPoint(rightWrist)
     );
 
-    const ready = leftReady && rightReady;
-    if (ready !== this.ready) {
-      this.ready = ready;
-      if (typeof this.options.onReadyChange === 'function') {
-        this.options.onReadyChange(ready);
-      }
-    }
+    const bothGrabbing = Boolean(leftState?.grab && rightState?.grab);
+    const shouldEngage = leftInside && rightInside && bothGrabbing;
 
-    const grabbing = Boolean(ready && leftState?.grab && rightState?.grab && leftWrist && rightWrist);
-    if (!grabbing) {
-      this.engaged = false;
-      return { ready, grabbing: false };
-    }
-
-    const midpoint = this.temp.midpoint.copy(leftWrist).add(rightWrist).multiplyScalar(0.5);
-    const spanVector = this.temp.span.copy(rightWrist).sub(leftWrist);
-    const spanLength = spanVector.length();
-    const hasSpan = spanLength > 1e-4;
-
-    if (!this.engaged) {
+    if (!this.engaged && shouldEngage) {
       this.engaged = true;
+      DoubleGrabController.activeController = this;
+      const midpoint = this.temp.midpoint.copy(leftWrist).add(rightWrist).multiplyScalar(0.5);
       this.initial.midpoint.copy(midpoint);
       this.initial.offset.copy(this.group.position).sub(midpoint);
-      if (hasSpan) {
+      const spanVector = this.temp.span.copy(rightWrist).sub(leftWrist);
+      const spanLength = spanVector.length();
+      if (spanLength > 1e-4) {
         this.initial.direction.copy(this.temp.direction.copy(spanVector).normalize());
         this.initial.distance = spanLength;
       } else {
@@ -468,33 +483,49 @@ class DoubleGrabController {
       }
       this.initial.quaternion.copy(this.group.quaternion);
       this.initial.scale = this.group.scale.x;
-    } else {
-      if (hasSpan) {
-        const direction = this.temp.direction.copy(spanVector).normalize();
-        const rotationDelta = this.temp.rotationDelta.setFromUnitVectors(
-          this.initial.direction,
-          direction
-        );
-        const rotated = this.temp.workingQuaternion.copy(this.initial.quaternion);
-        rotated.premultiply(rotationDelta);
-        this.group.quaternion.copy(rotated);
-
-        const relativeScale = spanLength / Math.max(this.initial.distance, 0.1);
-        const clampedScale = THREE.MathUtils.clamp(
-          this.initial.scale * relativeScale,
-          this.options.minScale,
-          this.options.maxScale
-        );
-        this.group.scale.setScalar(clampedScale);
-      }
-
-      const newPosition = this.temp.nextPosition.copy(midpoint).add(this.initial.offset);
-      this.group.position.copy(newPosition);
     }
 
-    return { ready, grabbing: true };
+    this.setHighlight(this.engaged || shouldEngage);
+
+    if (!this.engaged) {
+      return { ready: this.highlighted, grabbing: false };
+    }
+
+    if (!bothGrabbing || !leftWrist || !rightWrist || !leftState?.visible || !rightState?.visible) {
+      this.release();
+      return { ready: false, grabbing: false };
+    }
+
+    const midpoint = this.temp.midpoint.copy(leftWrist).add(rightWrist).multiplyScalar(0.5);
+    const spanVector = this.temp.span.copy(rightWrist).sub(leftWrist);
+    const spanLength = spanVector.length();
+    if (spanLength > 1e-4) {
+      const direction = this.temp.direction.copy(spanVector).normalize();
+      const rotationDelta = this.temp.rotationDelta.setFromUnitVectors(
+        this.initial.direction,
+        direction
+      );
+      const rotated = this.temp.workingQuaternion.copy(this.initial.quaternion);
+      rotated.premultiply(rotationDelta);
+      this.group.quaternion.copy(rotated);
+
+      const relativeScale = spanLength / Math.max(this.initial.distance, 0.1);
+      const clampedScale = THREE.MathUtils.clamp(
+        this.initial.scale * relativeScale,
+        this.options.minScale,
+        this.options.maxScale
+      );
+      this.group.scale.setScalar(clampedScale);
+    }
+
+    const newPosition = this.temp.nextPosition.copy(midpoint).add(this.initial.offset);
+    this.group.position.copy(newPosition);
+
+    return { ready: this.highlighted, grabbing: true };
   }
 }
+
+DoubleGrabController.activeController = null;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x101218);
@@ -663,21 +694,30 @@ const controlButtonMaterial = new THREE.MeshStandardMaterial({
 });
 const controlButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.035, 0.12), controlButtonMaterial);
 controlButton.position.set(-0.18, -0.03, 0.06);
+controlButton.rotation.z = Math.PI / 2;
 controlRig.add(controlButton);
+controlButton.geometry.computeBoundingBox();
+const controlButtonHalfExtents = new THREE.Vector3();
+controlButton.geometry.boundingBox
+  .getSize(controlButtonHalfExtents)
+  .multiplyScalar(0.5);
 
 const controlButtonState = {
   baseColor: new THREE.Color(0x3ab0ff),
   activeColor: new THREE.Color(0xff7f9e),
-  cooldown: 0,
-  pressed: false,
   restZ: controlButton.position.z,
   maxPressDepth: 0.045,
-  ready: false
+  currentDepth: 0,
+  targetDepth: 0,
+  damping: 18,
+  activationThreshold: 0.95,
+  releaseThreshold: 0.2,
+  latched: false,
+  ready: false,
+  contactPadding: 0.012,
+  depthBias: 0.003,
+  halfExtents: controlButtonHalfExtents
 };
-controlButton.geometry.computeBoundingSphere();
-const controlButtonCenter = new THREE.Vector3();
-const CONTROL_BUTTON_BASE_RADIUS = controlButton.geometry.boundingSphere.radius;
-const CONTROL_BUTTON_COOLDOWN = 0.18;
 
 const toggleButtonMaterial = new THREE.MeshStandardMaterial({
   color: 0xff5fa2,
@@ -688,24 +728,33 @@ const toggleButtonMaterial = new THREE.MeshStandardMaterial({
 });
 const toggleButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.035, 0.12), toggleButtonMaterial);
 toggleButton.position.set(0.18, -0.03, 0.06);
+toggleButton.rotation.z = Math.PI / 2;
 controlRig.add(toggleButton);
-toggleButton.geometry.computeBoundingSphere();
-const toggleButtonCenter = new THREE.Vector3();
-const TOGGLE_BUTTON_BASE_RADIUS = toggleButton.geometry.boundingSphere.radius;
+toggleButton.geometry.computeBoundingBox();
+const toggleButtonHalfExtents = new THREE.Vector3();
+toggleButton.geometry.boundingBox
+  .getSize(toggleButtonHalfExtents)
+  .multiplyScalar(0.5);
 
 const toggleButtonState = {
   offColor: new THREE.Color(0xff5fa2),
   offActiveColor: new THREE.Color(0xff8cc4),
   onColor: new THREE.Color(0x4dffc3),
   onActiveColor: new THREE.Color(0x8dffe0),
-  cooldown: 0,
-  pressed: false,
   restZ: toggleButton.position.z,
   maxPressDepth: 0.045,
+  currentDepth: 0,
+  targetDepth: 0,
+  damping: 18,
+  activationThreshold: 0.95,
+  releaseThreshold: 0.35,
+  latched: false,
   ready: false,
-  toggled: false
+  toggled: false,
+  contactPadding: 0.012,
+  depthBias: 0.003,
+  halfExtents: toggleButtonHalfExtents
 };
-const TOGGLE_BUTTON_COOLDOWN = 0.18;
 
 const controlRigController = new DoubleGrabController(controlRig, {
   proximity: 0.16,
@@ -718,20 +767,64 @@ const controlRigController = new DoubleGrabController(controlRig, {
   }
 });
 
-function handTouchesButton(handState, targetCenter, baseRadius, extra = 0.05) {
-  if (!handState?.visible) return false;
-  const points = Array.isArray(handState.contactPoints) ? handState.contactPoints : [];
-  const pinchPoint = handState.pinch?.position ?? null;
-  const scaledRadius = (baseRadius + extra) * controlRig.scale.x;
-  for (const point of points) {
-    if (point.distanceTo(targetCenter) <= scaledRadius) {
-      return true;
+const buttonWorkVector = new THREE.Vector3();
+
+function computeButtonTargetDepth(button, state, handStates) {
+  const halfExtents = state.halfExtents;
+  if (!halfExtents) return 0;
+  const padding = state.contactPadding ?? 0.012;
+  const depthBias = state.depthBias ?? 0;
+  let maxDepth = 0;
+
+  for (const handState of handStates) {
+    if (!handState?.visible) continue;
+    const contactPoints = Array.isArray(handState.contactPoints) ? handState.contactPoints : [];
+    for (const point of contactPoints) {
+      buttonWorkVector.copy(point);
+      button.worldToLocal(buttonWorkVector);
+      if (
+        Math.abs(buttonWorkVector.x) <= halfExtents.x + padding &&
+        Math.abs(buttonWorkVector.y) <= halfExtents.y + padding
+      ) {
+        const depth = halfExtents.z - buttonWorkVector.z + depthBias;
+        if (depth > maxDepth) {
+          maxDepth = depth;
+        }
+      }
+    }
+    const pinchPoint = handState.pinch?.position ?? null;
+    if (pinchPoint) {
+      buttonWorkVector.copy(pinchPoint);
+      button.worldToLocal(buttonWorkVector);
+      if (
+        Math.abs(buttonWorkVector.x) <= halfExtents.x + padding &&
+        Math.abs(buttonWorkVector.y) <= halfExtents.y + padding
+      ) {
+        const depth = halfExtents.z - buttonWorkVector.z + depthBias;
+        if (depth > maxDepth) {
+          maxDepth = depth;
+        }
+      }
     }
   }
-  if (pinchPoint && pinchPoint.distanceTo(targetCenter) <= scaledRadius) {
-    return true;
+
+  return THREE.MathUtils.clamp(maxDepth, 0, state.maxPressDepth);
+}
+
+function updatePanelButton(button, state, leftState, rightState, delta) {
+  button.updateWorldMatrix(true, false);
+  const targetDepth = computeButtonTargetDepth(button, state, [leftState, rightState]);
+  state.targetDepth = targetDepth;
+  const damping = state.damping ?? 18;
+  state.currentDepth = THREE.MathUtils.damp(state.currentDepth, targetDepth, damping, delta);
+  if (Math.abs(state.currentDepth - targetDepth) < 1e-4) {
+    state.currentDepth = targetDepth;
   }
-  return false;
+  state.currentDepth = THREE.MathUtils.clamp(state.currentDepth, 0, state.maxPressDepth);
+  button.position.z = state.restZ - state.currentDepth;
+  return state.maxPressDepth > 0
+    ? THREE.MathUtils.clamp(state.currentDepth / state.maxPressDepth, 0, 1)
+    : 0;
 }
 
 const clock = new THREE.Clock();
@@ -750,76 +843,63 @@ renderer.setAnimationLoop(() => {
   const logRigStatus = logRigController.update(leftState, rightState);
   const controlRigStatus = controlRigController.update(leftState, rightState);
 
-  controlButton.getWorldPosition(controlButtonCenter);
-  toggleButton.getWorldPosition(toggleButtonCenter);
+  const controlPressRatio = updatePanelButton(
+    controlButton,
+    controlButtonState,
+    leftState,
+    rightState,
+    delta
+  );
+  const togglePressRatio = updatePanelButton(
+    toggleButton,
+    toggleButtonState,
+    leftState,
+    rightState,
+    delta
+  );
 
-  const singlePressedNow =
-    handTouchesButton(leftState, controlButtonCenter, CONTROL_BUTTON_BASE_RADIUS) ||
-    handTouchesButton(rightState, controlButtonCenter, CONTROL_BUTTON_BASE_RADIUS);
-
-  const togglePressedNow =
-    handTouchesButton(leftState, toggleButtonCenter, TOGGLE_BUTTON_BASE_RADIUS) ||
-    handTouchesButton(rightState, toggleButtonCenter, TOGGLE_BUTTON_BASE_RADIUS);
-
-  if (singlePressedNow) {
-    if (!controlButtonState.pressed) {
-      controlButtonState.pressed = true;
+  if (controlPressRatio >= controlButtonState.activationThreshold) {
+    if (!controlButtonState.latched) {
+      controlButtonState.latched = true;
       systemMessages.unshift('Single press activated');
       systemMessages.splice(12);
     }
-    controlButtonState.cooldown = CONTROL_BUTTON_COOLDOWN;
-  } else {
-    controlButtonState.pressed = false;
-    controlButtonState.cooldown = Math.max(controlButtonState.cooldown - delta, 0);
+  } else if (controlButtonState.latched && controlPressRatio <= controlButtonState.releaseThreshold) {
+    controlButtonState.latched = false;
   }
 
-  if (togglePressedNow) {
-    if (!toggleButtonState.pressed) {
-      toggleButtonState.pressed = true;
+  if (togglePressRatio >= toggleButtonState.activationThreshold) {
+    if (!toggleButtonState.latched) {
+      toggleButtonState.latched = true;
       toggleButtonState.toggled = !toggleButtonState.toggled;
       const toggleLabel = toggleButtonState.toggled ? 'ON' : 'OFF';
       systemMessages.unshift(`Toggle button: ${toggleLabel}`);
       systemMessages.splice(12);
       controlPanelOverlay.update({ toggleStatus: toggleLabel });
     }
-    toggleButtonState.cooldown = TOGGLE_BUTTON_COOLDOWN;
-  } else {
-    toggleButtonState.pressed = false;
-    toggleButtonState.cooldown = Math.max(toggleButtonState.cooldown - delta, 0);
+  } else if (toggleButtonState.latched && togglePressRatio <= toggleButtonState.releaseThreshold) {
+    toggleButtonState.latched = false;
   }
 
-  const activationStrength = THREE.MathUtils.clamp(
-    controlButtonState.cooldown / CONTROL_BUTTON_COOLDOWN,
-    0,
-    1
-  );
   controlButtonMaterial.color
     .copy(controlButtonState.baseColor)
-    .lerp(controlButtonState.activeColor, activationStrength);
-  const emissiveBase = controlButtonState.ready ? 0.7 : 0.4;
-  controlButtonMaterial.emissiveIntensity = emissiveBase + activationStrength * 0.9;
-  controlButton.position.z =
-    controlButtonState.restZ - activationStrength * controlButtonState.maxPressDepth;
+    .lerp(controlButtonState.activeColor, controlPressRatio);
+  const controlEmissiveBase = controlButtonState.ready ? 0.95 : 0.45;
+  controlButtonMaterial.emissiveIntensity = controlEmissiveBase + controlPressRatio * 1.05;
 
-  const toggleActivation = THREE.MathUtils.clamp(
-    toggleButtonState.cooldown / TOGGLE_BUTTON_COOLDOWN,
-    0,
-    1
-  );
   const toggleBaseColor = toggleButtonState.toggled
     ? toggleButtonState.onColor
     : toggleButtonState.offColor;
   const toggleActiveColor = toggleButtonState.toggled
     ? toggleButtonState.onActiveColor
     : toggleButtonState.offActiveColor;
-  toggleButtonMaterial.color.copy(toggleBaseColor).lerp(toggleActiveColor, toggleActivation);
+  toggleButtonMaterial.color.copy(toggleBaseColor).lerp(toggleActiveColor, togglePressRatio);
   const toggleEmissiveBase = toggleButtonState.ready
     ? toggleButtonState.toggled
-      ? 0.9
-      : 0.55
-    : 0.35;
-  toggleButtonMaterial.emissiveIntensity = toggleEmissiveBase + toggleActivation * 0.85;
-  toggleButton.position.z = toggleButtonState.restZ - toggleActivation * toggleButtonState.maxPressDepth;
+      ? 1
+      : 0.6
+    : 0.4;
+  toggleButtonMaterial.emissiveIntensity = toggleEmissiveBase + togglePressRatio * 0.9;
 
   leftLogPanel.setLines(leftTracker.getLogLines());
   rightLogPanel.setLines(rightTracker.getLogLines());
