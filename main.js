@@ -89,14 +89,16 @@ class HandTracker {
       }
       if (tipDistances.length === fingerNames.length) {
         const avg = tipDistances.reduce((sum, value) => sum + value, 0) / tipDistances.length;
-        grabActive = avg < 0.07;
+        grabActive = avg < 0.09;
         openActive = avg > 0.11;
       }
     }
 
+    const wristPosition = wrist ? wrist.position.clone() : null;
+
     this.state = {
       visible,
-      wrist,
+      wrist: wristPosition,
       indexTip: indexTip ? indexTip.position.clone() : null,
       thumbTip: thumbTip ? thumbTip.position.clone() : null,
       pinch: {
@@ -158,7 +160,7 @@ class HandTracker {
     }
 
     const lines = [
-      `${this.label} wrist: (${formatVec3(this.state.wrist.position)})`
+      `${this.label} wrist: (${formatVec3(this.state.wrist)})`
     ];
 
     if (this.state.indexTip) {
@@ -173,6 +175,9 @@ class HandTracker {
       lines.push(
         `${this.label} pinch: ${this.state.pinch.active ? 'YES' : 'no'} (dist ${this.state.pinch.distance.toFixed(3)})`
       );
+      if (this.state.pinch.active && this.state.pinch.speed > 0) {
+        lines.push(`${this.label} pinch speed: ${this.state.pinch.speed.toFixed(3)} m/s`);
+      }
     }
 
     lines.push(`${this.label} grab: ${this.state.grab ? 'YES' : 'no'}`);
@@ -229,6 +234,61 @@ function createLabelSprite(message, options = {}) {
   sprite.renderOrder = renderOrder;
   sprite.userData.texture = texture;
   return sprite;
+}
+
+class LogPanel {
+  constructor(title, { width = 1.05, height = 0.55 } = {}) {
+    this.title = title;
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = 640;
+    this.canvas.height = 360;
+    this.ctx = this.canvas.getContext('2d');
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    this.texture.minFilter = THREE.LinearFilter;
+    this.material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true });
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.material);
+    this.lines = [];
+    this.render();
+  }
+
+  setTitle(title) {
+    if (this.title === title) return;
+    this.title = title;
+    this.render();
+  }
+
+  setLines(lines) {
+    const nextLines = Array.isArray(lines) ? lines : [];
+    if (nextLines.length === this.lines.length && nextLines.every((line, i) => line === this.lines[i])) {
+      return;
+    }
+    this.lines = [...nextLines];
+    this.render();
+  }
+
+  render() {
+    const { ctx } = this;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    ctx.fillStyle = '#00ffcc';
+    ctx.font = '600 34px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.textBaseline = 'top';
+    ctx.fillText(this.title, 24, 24);
+
+    ctx.fillStyle = '#f1f6ff';
+    ctx.font = '28px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    let y = 80;
+    const lineHeight = 36;
+    for (const line of this.lines) {
+      ctx.fillText(line, 24, y);
+      y += lineHeight;
+      if (y > this.canvas.height - lineHeight) break;
+    }
+
+    this.texture.needsUpdate = true;
+  }
 }
 
 function updateOrbiterPosition(object, time) {
@@ -386,40 +446,40 @@ trackers.forEach((tracker) => {
   });
 });
 
-const logCanvas = document.createElement('canvas');
-logCanvas.width = 768;
-logCanvas.height = 384;
-const ctx = logCanvas.getContext('2d');
+const logRig = new THREE.Group();
+logRig.position.set(0, 1.6, -1.2);
+scene.add(logRig);
 
-const logTex = new THREE.CanvasTexture(logCanvas);
-logTex.minFilter = THREE.LinearFilter;
+const leftLogPanel = new LogPanel('Left Hand Log');
+leftLogPanel.mesh.position.set(-1.25, 0, 0);
+logRig.add(leftLogPanel.mesh);
 
-const logMat = new THREE.MeshBasicMaterial({ map: logTex, transparent: true });
-const logPanel = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.6), logMat);
-logPanel.position.set(0, 1.6, -1.2);
-scene.add(logPanel);
+const rightLogPanel = new LogPanel('Right Hand Log');
+rightLogPanel.mesh.position.set(1.25, 0, 0);
+logRig.add(rightLogPanel.mesh);
 
-function writeLog(lines) {
-  ctx.clearRect(0, 0, logCanvas.width, logCanvas.height);
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(0, 0, logCanvas.width, logCanvas.height);
-  ctx.fillStyle = '#00ffcc';
-  ctx.font = '28px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-  let y = 40;
-  for (const line of lines) {
-    ctx.fillText(line, 20, y);
-    y += 36;
-  }
-  logTex.needsUpdate = true;
-}
+const systemLogPanel = new LogPanel('System Log');
+systemLogPanel.mesh.position.set(0, 0, 0);
+logRig.add(systemLogPanel.mesh);
+
+const systemMessages = [];
 
 window.addEventListener('error', (e) => {
-  try {
-    writeLog([`Error: ${e.message}`]);
-  } catch (_) {
-    // ignore canvas write errors
-  }
+  systemMessages.unshift(`Error: ${e.message}`);
+  systemMessages.splice(12);
 });
+
+const logRigManipulator = {
+  engaged: false,
+  initial: {
+    midpoint: new THREE.Vector3(),
+    offset: new THREE.Vector3(),
+    direction: new THREE.Vector3(1, 0, 0),
+    distance: 0.4,
+    quaternion: new THREE.Quaternion(),
+    scale: 1
+  }
+};
 
 const clock = new THREE.Clock();
 
@@ -445,24 +505,91 @@ renderer.setAnimationLoop(() => {
 
   trackers.forEach((tracker) => tracker.update(elapsed, delta));
 
-  const lines = ['WebXR Hand Log – Spring Refresh', '—'];
-  trackers.forEach((tracker) => {
-    lines.push(...tracker.getLogLines());
-  });
+  const [leftTracker, rightTracker] = trackers;
+  const leftState = leftTracker.state;
+  const rightState = rightTracker.state;
+  const leftWrist = leftState.wrist;
+  const rightWrist = rightState.wrist;
 
-  const activePinches = Object.entries(pinchTelemetry).filter(([, data]) => data);
+  const bothGrabbing = Boolean(
+    leftState.visible &&
+      rightState.visible &&
+      leftState.grab &&
+      rightState.grab &&
+      leftWrist &&
+      rightWrist
+  );
+
+  if (bothGrabbing) {
+    const midpoint = new THREE.Vector3().addVectors(leftWrist, rightWrist).multiplyScalar(0.5);
+    const spanVector = new THREE.Vector3().subVectors(rightWrist, leftWrist);
+    const spanLength = spanVector.length();
+    const hasSpan = spanLength > 1e-4;
+
+    if (!logRigManipulator.engaged) {
+      logRigManipulator.engaged = true;
+      logRigManipulator.initial.midpoint.copy(midpoint);
+      logRigManipulator.initial.offset.copy(logRig.position).sub(midpoint);
+      if (hasSpan) {
+        logRigManipulator.initial.direction.copy(spanVector.clone().normalize());
+        logRigManipulator.initial.distance = spanLength;
+      } else {
+        logRigManipulator.initial.direction.set(1, 0, 0);
+        logRigManipulator.initial.distance = 0.3;
+      }
+      logRigManipulator.initial.quaternion.copy(logRig.quaternion);
+      logRigManipulator.initial.scale = logRig.scale.x;
+    } else {
+      if (hasSpan) {
+        const direction = spanVector.clone().normalize();
+        const rotationDelta = new THREE.Quaternion().setFromUnitVectors(
+          logRigManipulator.initial.direction,
+          direction
+        );
+        const rotated = logRigManipulator.initial.quaternion.clone();
+        rotated.premultiply(rotationDelta);
+        logRig.quaternion.copy(rotated);
+
+        const relativeScale = spanLength / Math.max(logRigManipulator.initial.distance, 0.1);
+        const clampedScale = THREE.MathUtils.clamp(
+          logRigManipulator.initial.scale * relativeScale,
+          0.35,
+          3.5
+        );
+        logRig.scale.setScalar(clampedScale);
+      }
+
+      const newPosition = midpoint.clone().add(logRigManipulator.initial.offset);
+      logRig.position.copy(newPosition);
+    }
+  } else {
+    logRigManipulator.engaged = false;
+  }
+
+  leftLogPanel.setLines(leftTracker.getLogLines());
+  rightLogPanel.setLines(rightTracker.getLogLines());
+
+  const generalLines = [];
+  const activePinches = Object.entries(pinchTelemetry).filter(([, data]) => data && data.position);
   if (activePinches.length > 0) {
-    lines.push('—', 'Pinch telemetry');
+    generalLines.push('Active pinches');
     activePinches.forEach(([label, data]) => {
-      if (!data || !data.position) return;
-      lines.push(
-        `${label} pinch pos: (${formatVec3(data.position)})`,
-        `${label} pinch speed: ${data.speed.toFixed(3)} m/s`
+      generalLines.push(
+        `${label}: pos (${formatVec3(data.position)})`,
+        `${label}: speed ${data.speed.toFixed(3)} m/s`
       );
     });
   }
 
-  writeLog(lines);
+  if (bothGrabbing) {
+    generalLines.push('—', 'Adjusting log cluster…', `Scale ×${logRig.scale.x.toFixed(2)}`);
+  }
+
+  if (systemMessages.length) {
+    generalLines.push('—', ...systemMessages);
+  }
+
+  systemLogPanel.setLines(generalLines);
   renderer.render(scene, camera);
 });
 
