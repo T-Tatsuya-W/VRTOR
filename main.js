@@ -232,7 +232,7 @@ function createLabelSprite(message, options = {}) {
 }
 
 function updateOrbiterPosition(object, time) {
-  const radius = 0.55;
+  const radius = object.userData.orbitRadius ?? 0.55;
   const speed = object.userData.orbitSpeed ?? 0.3;
   const angle = object.userData.baseAngle + time * speed;
   const heightPhase = object.userData.heightPhase ?? 0;
@@ -290,6 +290,12 @@ const orbiterGroup = new THREE.Group();
 orbiterGroup.position.set(0, 1.5, 0);
 scene.add(orbiterGroup);
 
+function addOrbiter(object, config = {}) {
+  Object.assign(object.userData, config);
+  updateOrbiterPosition(object, 0);
+  orbiterGroup.add(object);
+}
+
 const pyramidGeo = new THREE.TetrahedronGeometry(0.1);
 const pyramidMat = new THREE.MeshStandardMaterial({
   color: 0xffc857,
@@ -298,42 +304,34 @@ const pyramidMat = new THREE.MeshStandardMaterial({
   flatShading: true
 });
 
-const orbiterLabels = ['Access', 'Sync', 'Link', 'Pulse'];
-const orbiterTotal = 12;
+const ORBITER_LABELS = ['Access', 'Sync', 'Link', 'Pulse'];
+const ORBITER_TOTAL = 12;
 let labelIndex = 0;
-for (let i = 0; i < orbiterTotal; i++) {
-  const baseAngle = (i / orbiterTotal) * Math.PI * 2;
+
+for (let i = 0; i < ORBITER_TOTAL; i++) {
+  const baseAngle = (i / ORBITER_TOTAL) * Math.PI * 2;
   const heightPhase = Math.random() * Math.PI * 2;
   const orbitSpeed = 0.25 + Math.random() * 0.25;
   const bobAmplitude = 0.08 + Math.random() * 0.04;
 
-  const shouldUseLabel = i % 3 === 2 && labelIndex < orbiterLabels.length;
+  const config = { baseAngle, heightPhase, orbitSpeed, bobAmplitude };
+  const shouldUseLabel = i % 3 === 2 && labelIndex < ORBITER_LABELS.length;
+
   if (shouldUseLabel) {
-    const label = createLabelSprite(orbiterLabels[labelIndex++], {
+    const label = createLabelSprite(ORBITER_LABELS[labelIndex++], {
       width: 0.35,
       fontSize: 110,
       renderOrder: 20,
       depthTest: false
     });
-    Object.assign(label.userData, { baseAngle, heightPhase, orbitSpeed, bobAmplitude });
-    updateOrbiterPosition(label, 0);
-    orbiterGroup.add(label);
+    addOrbiter(label, config);
   } else {
     const pyramid = new THREE.Mesh(pyramidGeo, pyramidMat.clone());
-    pyramid.userData.baseAngle = baseAngle;
-    pyramid.userData.heightPhase = heightPhase;
-    pyramid.userData.spinSpeed = 0.5 + Math.random() * 0.6;
-    pyramid.userData.orbitSpeed = orbitSpeed;
-    pyramid.userData.bobAmplitude = bobAmplitude;
-    updateOrbiterPosition(pyramid, 0);
+    const spinSpeed = 0.5 + Math.random() * 0.6;
     pyramid.rotation.x = Math.PI / 3;
-    orbiterGroup.add(pyramid);
+    addOrbiter(pyramid, { ...config, spinSpeed });
   }
 }
-
-const torusLabel = createLabelSprite('Portal Hub', { renderOrder: 25, depthTest: false });
-torusLabel.position.set(0, 1.5, 0);
-scene.add(torusLabel);
 
 const cubes = new THREE.Group();
 scene.add(cubes);
