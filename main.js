@@ -186,6 +186,49 @@ function formatVec3(v) {
   return `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`;
 }
 
+function createLabelSprite(message) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const context = canvas.getContext('2d');
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.font = '120px "Trebuchet MS", "Segoe UI", sans-serif';
+  context.fillStyle = '#ffffff';
+  context.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  context.lineWidth = 10;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.strokeText(message, canvas.width / 2, canvas.height / 2);
+  context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false
+  });
+
+  const sprite = new THREE.Sprite(material);
+  const aspect = canvas.height / canvas.width;
+  const width = 0.8;
+  sprite.scale.set(width, width * aspect, 1);
+  sprite.renderOrder = 10;
+  sprite.userData.texture = texture;
+  return sprite;
+}
+
+function updatePyramidPosition(pyramid, time) {
+  const radius = 0.55;
+  const angle = pyramid.userData.baseAngle + time * 0.3;
+  const height = Math.sin(time * 1.6 + pyramid.userData.heightPhase) * 0.1;
+  pyramid.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
+}
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x101218);
 
@@ -214,6 +257,49 @@ scene.add(dir);
 const grid = new THREE.GridHelper(10, 20, 0x333333, 0x222222);
 grid.position.y = 0;
 scene.add(grid);
+
+const torusMaterial = new THREE.MeshStandardMaterial({
+  color: 0x55ffee,
+  emissive: 0x08263a,
+  metalness: 0.35,
+  roughness: 0.15,
+  transparent: true,
+  opacity: 0.35,
+  side: THREE.DoubleSide,
+  depthWrite: false
+});
+
+const torus = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 64, 128), torusMaterial);
+torus.position.set(0, 1.5, 0);
+torus.rotation.x = Math.PI / 2;
+scene.add(torus);
+
+const pyramidGroup = new THREE.Group();
+pyramidGroup.position.set(0, 1.5, 0);
+scene.add(pyramidGroup);
+
+const pyramidGeo = new THREE.TetrahedronGeometry(0.1);
+const pyramidMat = new THREE.MeshStandardMaterial({
+  color: 0xffc857,
+  metalness: 0.2,
+  roughness: 0.4,
+  flatShading: true
+});
+
+const pyramidCount = 10;
+for (let i = 0; i < pyramidCount; i++) {
+  const pyramid = new THREE.Mesh(pyramidGeo, pyramidMat.clone());
+  pyramid.userData.baseAngle = (i / pyramidCount) * Math.PI * 2;
+  pyramid.userData.heightPhase = Math.random() * Math.PI * 2;
+  pyramid.userData.spinSpeed = 0.5 + Math.random() * 0.6;
+  updatePyramidPosition(pyramid, 0);
+  pyramid.rotation.x = Math.PI / 3;
+  pyramidGroup.add(pyramid);
+}
+
+const torusLabel = createLabelSprite('Portal Hub');
+torusLabel.position.set(0, 1.5, 0);
+scene.add(torusLabel);
 
 const cubes = new THREE.Group();
 scene.add(cubes);
@@ -314,6 +400,14 @@ renderer.setAnimationLoop(() => {
     m.rotation.y += 0.01;
     m.position.y = m.userData.baseY + Math.sin(t * 0.8 + m.userData.phase) * 0.08;
   }
+
+  torus.rotation.y += delta * 0.3;
+
+  pyramidGroup.children.forEach((pyramid) => {
+    updatePyramidPosition(pyramid, elapsed);
+    pyramid.rotation.y += delta * pyramid.userData.spinSpeed;
+    pyramid.rotation.x += delta * 0.4;
+  });
 
   controls.update();
 

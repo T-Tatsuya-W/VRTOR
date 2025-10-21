@@ -6,6 +6,7 @@ This repository hosts a lightweight WebXR experience for experimenting with Ques
 
 - Modular file layout (`index.html`, `styles.css`, `main.js`) so markup, styling, and logic can evolve independently.
 - Minimal Three.js scene with floating cubes, grid floor, and XR-compatible lighting.
+- Transparent centerpiece torus with animated tetrahedral markers and a billboarded portal label that always faces the viewer.
 - WebXR hand tracking powered by `XRHandModelFactory`, rendered as lightweight sphere hands.
 - Gesture manager that detects pinches, open-hand, and grab poses, exposing hooks for future interactions.
 - Pinch telemetry logger that captures pinch position and speed whenever a pinch is held, displayed on the in-world panel.
