@@ -20,7 +20,8 @@ class HandTracker {
         speed: 0
       },
       grab: false,
-      open: false
+      open: false,
+      contactPoints: []
     };
 
     this.prev = {
@@ -80,21 +81,28 @@ class HandTracker {
 
     let grabActive = false;
     let openActive = false;
-    if (visible && wrist) {
+    const contactPoints = [];
+    const wristPosition = wrist ? wrist.position.clone() : null;
+    if (wristPosition) {
+      contactPoints.push(wristPosition);
+    }
+
+    if (visible) {
       const tipDistances = [];
       for (const name of fingerNames) {
         const joint = joints ? joints[name] : null;
         if (!joint) continue;
-        tipDistances.push(joint.position.distanceTo(wrist.position));
+        contactPoints.push(joint.position.clone());
+        if (wristPosition) {
+          tipDistances.push(joint.position.distanceTo(wristPosition));
+        }
       }
-      if (tipDistances.length === fingerNames.length) {
+      if (wristPosition && tipDistances.length === fingerNames.length) {
         const avg = tipDistances.reduce((sum, value) => sum + value, 0) / tipDistances.length;
         grabActive = avg < 0.09;
         openActive = avg > 0.11;
       }
     }
-
-    const wristPosition = wrist ? wrist.position.clone() : null;
 
     this.state = {
       visible,
@@ -108,7 +116,8 @@ class HandTracker {
         speed: pinchSpeed
       },
       grab: grabActive,
-      open: openActive
+      open: openActive,
+      contactPoints
     };
 
     const payloadBase = {
@@ -304,6 +313,81 @@ class LogPanel {
   }
 }
 
+class ControlPanelOverlay {
+  constructor({ width = 0.64, height = 0.38 } = {}) {
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = 512;
+    this.canvas.height = 320;
+    this.ctx = this.canvas.getContext('2d');
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    this.texture.minFilter = THREE.LinearFilter;
+    this.texture.magFilter = THREE.LinearFilter;
+    this.material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true });
+    this.material.depthTest = false;
+    this.material.depthWrite = false;
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.material);
+    this.mesh.position.set(0, 0, 0.002);
+    this.mesh.renderOrder = 20;
+    this.state = {
+      header: 'Controls',
+      singleLabel: 'Single Press',
+      singleHint: 'Tap to log an event',
+      toggleLabel: 'Toggle Button',
+      toggleStatus: 'OFF'
+    };
+    this.render();
+  }
+
+  update(nextState = {}) {
+    const merged = { ...this.state, ...nextState };
+    const changed = Object.keys(merged).some((key) => merged[key] !== this.state[key]);
+    if (!changed) return;
+    this.state = merged;
+    this.render();
+  }
+
+  render() {
+    const { ctx, canvas } = this;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = 'rgba(8, 26, 38, 0.55)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+
+    ctx.fillStyle = '#d1f8ff';
+    ctx.font = '700 44px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.textBaseline = 'top';
+    ctx.fillText(this.state.header, 32, 32);
+
+    ctx.font = '600 32px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillStyle = '#f1f6ff';
+    ctx.fillText(this.state.singleLabel, 32, 132);
+    ctx.fillText(this.state.toggleLabel, canvas.width * 0.5 + 24, 132);
+
+    ctx.font = '500 26px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillStyle = 'rgba(210, 235, 255, 0.8)';
+    ctx.fillText(this.state.singleHint, 32, 180);
+    ctx.fillText('Alternate colour each tap', canvas.width * 0.5 + 24, 220);
+
+    ctx.font = '600 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    const toggleActive = this.state.toggleStatus === 'ON';
+    ctx.fillStyle = toggleActive ? '#00ffcc' : '#ff9ebd';
+    const statusText = `State: ${this.state.toggleStatus}`;
+    ctx.fillText(statusText, canvas.width * 0.5 + 24, 180);
+
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.5, 110);
+    ctx.lineTo(canvas.width * 0.5, canvas.height - 32);
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.25)';
+    ctx.stroke();
+
+    this.texture.needsUpdate = true;
+  }
+}
+
 class DoubleGrabController {
   constructor(group, options = {}) {
     this.group = group;
@@ -316,6 +400,7 @@ class DoubleGrabController {
     };
 
     this.bounds = new THREE.Box3();
+    this.expandedBounds = new THREE.Box3();
     this.engaged = false;
     this.ready = false;
     this.initial = {
@@ -342,16 +427,13 @@ class DoubleGrabController {
 
     this.group.updateWorldMatrix(true, true);
     this.bounds.setFromObject(this.group);
+    this.expandedBounds.copy(this.bounds).expandByScalar(this.options.proximity);
 
     const leftReady = Boolean(
-      leftState?.visible &&
-        leftWrist &&
-        this.bounds.distanceToPoint(leftWrist) <= this.options.proximity
+      leftState?.visible && leftWrist && this.expandedBounds.containsPoint(leftWrist)
     );
     const rightReady = Boolean(
-      rightState?.visible &&
-        rightWrist &&
-        this.bounds.distanceToPoint(rightWrist) <= this.options.proximity
+      rightState?.visible && rightWrist && this.expandedBounds.containsPoint(rightWrist)
     );
 
     const ready = leftReady && rightReady;
@@ -459,16 +541,19 @@ torus.position.set(0, 1.5, 0);
 torus.rotation.x = Math.PI / 2;
 scene.add(torus);
 
-const torusLabel = createLabelSprite('XR LOGS', {
-  width: 0.42,
-  fontSize: 140,
+const torusLabel = createLabelSprite('VRTOR', {
+  width: 0.38,
+  fontSize: 160,
   color: '#f1f6ff',
   strokeStyle: 'rgba(0, 0, 0, 0.5)',
   renderOrder: 15,
   depthTest: false
 });
-torusLabel.position.set(0, 0.02, 0);
+const torusParams = torus.geometry.parameters;
+const torusLabelOffset = torusParams.radius - torusParams.tube * 0.5;
+torusLabel.position.set(0, 0, torusLabelOffset);
 torusLabel.material.depthTest = false;
+torusLabel.material.depthWrite = false;
 torus.add(torusLabel);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -534,6 +619,7 @@ window.addEventListener('error', (e) => {
 });
 
 const logRigController = new DoubleGrabController(logRig, {
+  proximity: 0.2,
   onReadyChange: (ready) => {
     [leftLogPanel, rightLogPanel, systemLogPanel].forEach((panel) => panel.setHighlighted(ready));
   }
@@ -565,6 +651,9 @@ const controlPanelFrame = new THREE.Mesh(
 controlPanelFrame.position.set(0, 0, -0.01);
 controlRig.add(controlPanelFrame);
 
+const controlPanelOverlay = new ControlPanelOverlay();
+controlRig.add(controlPanelOverlay.mesh);
+
 const controlButtonMaterial = new THREE.MeshStandardMaterial({
   color: 0x3ab0ff,
   emissive: 0x001c38,
@@ -572,21 +661,9 @@ const controlButtonMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.45,
   roughness: 0.4
 });
-const controlButton = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.2), controlButtonMaterial);
-controlButton.position.set(0, -0.02, 0.09);
+const controlButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.035, 0.12), controlButtonMaterial);
+controlButton.position.set(-0.18, -0.03, 0.06);
 controlRig.add(controlButton);
-
-const controlButtonLabel = createLabelSprite('Log Action', {
-  width: 0.36,
-  fontSize: 120,
-  color: '#fffbf5',
-  strokeStyle: 'rgba(0, 0, 0, 0.55)',
-  renderOrder: 25,
-  depthTest: false
-});
-controlButtonLabel.position.set(0, 0.16, 0.12);
-controlButtonLabel.material.depthTest = false;
-controlRig.add(controlButtonLabel);
 
 const controlButtonState = {
   baseColor: new THREE.Color(0x3ab0ff),
@@ -594,26 +671,67 @@ const controlButtonState = {
   cooldown: 0,
   pressed: false,
   restZ: controlButton.position.z,
-  maxPressDepth: 0.035,
+  maxPressDepth: 0.045,
   ready: false
 };
+controlButton.geometry.computeBoundingSphere();
 const controlButtonCenter = new THREE.Vector3();
-const CONTROL_BUTTON_BASE_RADIUS = 0.16;
+const CONTROL_BUTTON_BASE_RADIUS = controlButton.geometry.boundingSphere.radius;
+const CONTROL_BUTTON_COOLDOWN = 0.18;
+
+const toggleButtonMaterial = new THREE.MeshStandardMaterial({
+  color: 0xff5fa2,
+  emissive: 0x3a001f,
+  emissiveIntensity: 0.4,
+  metalness: 0.45,
+  roughness: 0.38
+});
+const toggleButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.035, 0.12), toggleButtonMaterial);
+toggleButton.position.set(0.18, -0.03, 0.06);
+controlRig.add(toggleButton);
+toggleButton.geometry.computeBoundingSphere();
+const toggleButtonCenter = new THREE.Vector3();
+const TOGGLE_BUTTON_BASE_RADIUS = toggleButton.geometry.boundingSphere.radius;
+
+const toggleButtonState = {
+  offColor: new THREE.Color(0xff5fa2),
+  offActiveColor: new THREE.Color(0xff8cc4),
+  onColor: new THREE.Color(0x4dffc3),
+  onActiveColor: new THREE.Color(0x8dffe0),
+  cooldown: 0,
+  pressed: false,
+  restZ: toggleButton.position.z,
+  maxPressDepth: 0.045,
+  ready: false,
+  toggled: false
+};
+const TOGGLE_BUTTON_COOLDOWN = 0.18;
 
 const controlRigController = new DoubleGrabController(controlRig, {
+  proximity: 0.16,
   minScale: 0.45,
   maxScale: 2.5,
   onReadyChange: (ready) => {
     controlPanelMaterial.emissiveIntensity = ready ? 0.9 : 0.35;
     controlButtonState.ready = ready;
+    toggleButtonState.ready = ready;
   }
 });
 
-function handPressesControlButton(handState) {
-  if (!handState?.visible || !handState?.wrist) return false;
-  if (!handState.grab) return false;
-  const scaledRadius = CONTROL_BUTTON_BASE_RADIUS * controlRig.scale.x;
-  return handState.wrist.distanceTo(controlButtonCenter) <= scaledRadius;
+function handTouchesButton(handState, targetCenter, baseRadius, extra = 0.05) {
+  if (!handState?.visible) return false;
+  const points = Array.isArray(handState.contactPoints) ? handState.contactPoints : [];
+  const pinchPoint = handState.pinch?.position ?? null;
+  const scaledRadius = (baseRadius + extra) * controlRig.scale.x;
+  for (const point of points) {
+    if (point.distanceTo(targetCenter) <= scaledRadius) {
+      return true;
+    }
+  }
+  if (pinchPoint && pinchPoint.distanceTo(targetCenter) <= scaledRadius) {
+    return true;
+  }
+  return false;
 }
 
 const clock = new THREE.Clock();
@@ -633,28 +751,75 @@ renderer.setAnimationLoop(() => {
   const controlRigStatus = controlRigController.update(leftState, rightState);
 
   controlButton.getWorldPosition(controlButtonCenter);
-  const buttonPressedNow = handPressesControlButton(leftState) || handPressesControlButton(rightState);
+  toggleButton.getWorldPosition(toggleButtonCenter);
 
-  if (buttonPressedNow) {
+  const singlePressedNow =
+    handTouchesButton(leftState, controlButtonCenter, CONTROL_BUTTON_BASE_RADIUS) ||
+    handTouchesButton(rightState, controlButtonCenter, CONTROL_BUTTON_BASE_RADIUS);
+
+  const togglePressedNow =
+    handTouchesButton(leftState, toggleButtonCenter, TOGGLE_BUTTON_BASE_RADIUS) ||
+    handTouchesButton(rightState, toggleButtonCenter, TOGGLE_BUTTON_BASE_RADIUS);
+
+  if (singlePressedNow) {
     if (!controlButtonState.pressed) {
       controlButtonState.pressed = true;
-      systemMessages.unshift('Control button pressed');
+      systemMessages.unshift('Single press activated');
       systemMessages.splice(12);
     }
-    controlButtonState.cooldown = 0.25;
+    controlButtonState.cooldown = CONTROL_BUTTON_COOLDOWN;
   } else {
     controlButtonState.pressed = false;
     controlButtonState.cooldown = Math.max(controlButtonState.cooldown - delta, 0);
   }
 
-  const activationStrength = THREE.MathUtils.clamp(controlButtonState.cooldown / 0.25, 0, 1);
+  if (togglePressedNow) {
+    if (!toggleButtonState.pressed) {
+      toggleButtonState.pressed = true;
+      toggleButtonState.toggled = !toggleButtonState.toggled;
+      const toggleLabel = toggleButtonState.toggled ? 'ON' : 'OFF';
+      systemMessages.unshift(`Toggle button: ${toggleLabel}`);
+      systemMessages.splice(12);
+      controlPanelOverlay.update({ toggleStatus: toggleLabel });
+    }
+    toggleButtonState.cooldown = TOGGLE_BUTTON_COOLDOWN;
+  } else {
+    toggleButtonState.pressed = false;
+    toggleButtonState.cooldown = Math.max(toggleButtonState.cooldown - delta, 0);
+  }
+
+  const activationStrength = THREE.MathUtils.clamp(
+    controlButtonState.cooldown / CONTROL_BUTTON_COOLDOWN,
+    0,
+    1
+  );
   controlButtonMaterial.color
     .copy(controlButtonState.baseColor)
     .lerp(controlButtonState.activeColor, activationStrength);
-  const emissiveBase = controlButtonState.ready ? 0.6 : 0.35;
-  controlButtonMaterial.emissiveIntensity = emissiveBase + activationStrength * 0.65;
-  controlButton.position.z = controlButtonState.restZ - activationStrength * controlButtonState.maxPressDepth;
-  controlButtonLabel.material.opacity = 0.85 + activationStrength * 0.15;
+  const emissiveBase = controlButtonState.ready ? 0.7 : 0.4;
+  controlButtonMaterial.emissiveIntensity = emissiveBase + activationStrength * 0.9;
+  controlButton.position.z =
+    controlButtonState.restZ - activationStrength * controlButtonState.maxPressDepth;
+
+  const toggleActivation = THREE.MathUtils.clamp(
+    toggleButtonState.cooldown / TOGGLE_BUTTON_COOLDOWN,
+    0,
+    1
+  );
+  const toggleBaseColor = toggleButtonState.toggled
+    ? toggleButtonState.onColor
+    : toggleButtonState.offColor;
+  const toggleActiveColor = toggleButtonState.toggled
+    ? toggleButtonState.onActiveColor
+    : toggleButtonState.offActiveColor;
+  toggleButtonMaterial.color.copy(toggleBaseColor).lerp(toggleActiveColor, toggleActivation);
+  const toggleEmissiveBase = toggleButtonState.ready
+    ? toggleButtonState.toggled
+      ? 0.9
+      : 0.55
+    : 0.35;
+  toggleButtonMaterial.emissiveIntensity = toggleEmissiveBase + toggleActivation * 0.85;
+  toggleButton.position.z = toggleButtonState.restZ - toggleActivation * toggleButtonState.maxPressDepth;
 
   leftLogPanel.setLines(leftTracker.getLogLines());
   rightLogPanel.setLines(rightTracker.getLogLines());
@@ -670,6 +835,11 @@ renderer.setAnimationLoop(() => {
       );
     });
   }
+
+  generalLines.push(
+    `Single press ready: ${controlButtonState.ready ? 'YES' : 'no'}`,
+    `Toggle button: ${toggleButtonState.toggled ? 'ON' : 'OFF'}`
+  );
 
   const statusLines = [];
   if (logRigStatus.grabbing) {
