@@ -11,6 +11,7 @@ class HandTracker {
     this.state = {
       visible: false,
       wrist: null,
+      palm: null,
       indexTip: null,
       thumbTip: null,
       pinch: {
@@ -82,9 +83,11 @@ class HandTracker {
     let grabActive = false;
     let openActive = false;
     const contactPoints = [];
+    const palmCandidates = [];
     const wristPosition = wrist ? wrist.position.clone() : null;
     if (wristPosition) {
       contactPoints.push(wristPosition);
+      palmCandidates.push(wristPosition.clone());
     }
 
     if (visible) {
@@ -97,6 +100,25 @@ class HandTracker {
           tipDistances.push(joint.position.distanceTo(wristPosition));
         }
       }
+      const palmJointNames = [
+        'thumb-metacarpal',
+        'index-finger-metacarpal',
+        'middle-finger-metacarpal',
+        'ring-finger-metacarpal',
+        'pinky-finger-metacarpal'
+      ];
+      for (const name of palmJointNames) {
+        const joint = joints ? joints[name] : null;
+        if (!joint) continue;
+        palmCandidates.push(joint.position.clone());
+      }
+      if (palmCandidates.length <= 1) {
+        for (const name of fingerNames) {
+          const joint = joints ? joints[name] : null;
+          if (!joint) continue;
+          palmCandidates.push(joint.position.clone());
+        }
+      }
       if (wristPosition && tipDistances.length === fingerNames.length) {
         const avg = tipDistances.reduce((sum, value) => sum + value, 0) / tipDistances.length;
         grabActive = avg < 0.09;
@@ -104,9 +126,17 @@ class HandTracker {
       }
     }
 
+    let palmPosition = null;
+    if (palmCandidates.length > 0) {
+      palmPosition = new THREE.Vector3();
+      palmCandidates.forEach((sample) => palmPosition.add(sample));
+      palmPosition.multiplyScalar(1 / palmCandidates.length);
+    }
+
     this.state = {
       visible,
       wrist: wristPosition,
+      palm: palmPosition ? palmPosition.clone() : null,
       indexTip: indexTip ? indexTip.position.clone() : null,
       thumbTip: thumbTip ? thumbTip.position.clone() : null,
       pinch: {
@@ -439,8 +469,8 @@ class DoubleGrabController {
   }
 
   update(leftState, rightState) {
-    const leftWrist = leftState?.wrist ?? null;
-    const rightWrist = rightState?.wrist ?? null;
+    const leftPoint = leftState?.palm ?? leftState?.wrist ?? null;
+    const rightPoint = rightState?.palm ?? rightState?.wrist ?? null;
 
     this.group.updateWorldMatrix(true, true);
     this.bounds.setFromObject(this.group);
@@ -449,30 +479,42 @@ class DoubleGrabController {
 
     const blockedByOther =
       DoubleGrabController.activeController && DoubleGrabController.activeController !== this;
+    const proximity = Math.max(0, this.options.proximity ?? 0);
+    const hasBounds = !this.intersectionBounds.isEmpty();
 
-    const leftInside = Boolean(
+    const leftDistance = hasBounds && leftPoint
+      ? this.intersectionBounds.distanceToPoint(leftPoint)
+      : Infinity;
+    const rightDistance = hasBounds && rightPoint
+      ? this.intersectionBounds.distanceToPoint(rightPoint)
+      : Infinity;
+
+    const leftTouching = Boolean(
       !blockedByOther &&
         leftState?.visible &&
-        leftWrist &&
-        this.intersectionBounds.containsPoint(leftWrist)
+        leftPoint &&
+        hasBounds &&
+        (this.intersectionBounds.containsPoint(leftPoint) || leftDistance <= proximity)
     );
-    const rightInside = Boolean(
+    const rightTouching = Boolean(
       !blockedByOther &&
         rightState?.visible &&
-        rightWrist &&
-        this.intersectionBounds.containsPoint(rightWrist)
+        rightPoint &&
+        hasBounds &&
+        (this.intersectionBounds.containsPoint(rightPoint) || rightDistance <= proximity)
     );
 
+    const bothTouching = leftTouching && rightTouching;
     const bothGrabbing = Boolean(leftState?.grab && rightState?.grab);
-    const shouldEngage = leftInside && rightInside && bothGrabbing;
+    const shouldEngage = bothTouching && bothGrabbing;
 
     if (!this.engaged && shouldEngage) {
       this.engaged = true;
       DoubleGrabController.activeController = this;
-      const midpoint = this.temp.midpoint.copy(leftWrist).add(rightWrist).multiplyScalar(0.5);
+      const midpoint = this.temp.midpoint.copy(leftPoint).add(rightPoint).multiplyScalar(0.5);
       this.initial.midpoint.copy(midpoint);
       this.initial.offset.copy(this.group.position).sub(midpoint);
-      const spanVector = this.temp.span.copy(rightWrist).sub(leftWrist);
+      const spanVector = this.temp.span.copy(rightPoint).sub(leftPoint);
       const spanLength = spanVector.length();
       if (spanLength > 1e-4) {
         this.initial.direction.copy(this.temp.direction.copy(spanVector).normalize());
@@ -485,19 +527,27 @@ class DoubleGrabController {
       this.initial.scale = this.group.scale.x;
     }
 
-    this.setHighlight(this.engaged || shouldEngage);
+    this.setHighlight(this.engaged || bothTouching);
 
     if (!this.engaged) {
       return { ready: this.highlighted, grabbing: false };
     }
 
-    if (!bothGrabbing || !leftWrist || !rightWrist || !leftState?.visible || !rightState?.visible) {
+    if (
+      !bothGrabbing ||
+      !leftPoint ||
+      !rightPoint ||
+      !leftState?.visible ||
+      !rightState?.visible ||
+      blockedByOther ||
+      !bothTouching
+    ) {
       this.release();
       return { ready: false, grabbing: false };
     }
 
-    const midpoint = this.temp.midpoint.copy(leftWrist).add(rightWrist).multiplyScalar(0.5);
-    const spanVector = this.temp.span.copy(rightWrist).sub(leftWrist);
+    const midpoint = this.temp.midpoint.copy(leftPoint).add(rightPoint).multiplyScalar(0.5);
+    const spanVector = this.temp.span.copy(rightPoint).sub(leftPoint);
     const spanLength = spanVector.length();
     if (spanLength > 1e-4) {
       const direction = this.temp.direction.copy(spanVector).normalize();
@@ -650,7 +700,8 @@ window.addEventListener('error', (e) => {
 });
 
 const logRigController = new DoubleGrabController(logRig, {
-  proximity: 0.2,
+  proximity: 0.065,
+  intersectionPadding: 0.04,
   onReadyChange: (ready) => {
     [leftLogPanel, rightLogPanel, systemLogPanel].forEach((panel) => panel.setHighlighted(ready));
   }
@@ -692,9 +743,8 @@ const controlButtonMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.45,
   roughness: 0.4
 });
-const controlButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.035, 0.12), controlButtonMaterial);
+const controlButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.1), controlButtonMaterial);
 controlButton.position.set(-0.18, -0.03, 0.06);
-controlButton.rotation.z = Math.PI / 2;
 controlRig.add(controlButton);
 controlButton.geometry.computeBoundingBox();
 const controlButtonHalfExtents = new THREE.Vector3();
@@ -726,9 +776,8 @@ const toggleButtonMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.45,
   roughness: 0.38
 });
-const toggleButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.035, 0.12), toggleButtonMaterial);
+const toggleButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.1), toggleButtonMaterial);
 toggleButton.position.set(0.18, -0.03, 0.06);
-toggleButton.rotation.z = Math.PI / 2;
 controlRig.add(toggleButton);
 toggleButton.geometry.computeBoundingBox();
 const toggleButtonHalfExtents = new THREE.Vector3();
@@ -757,7 +806,8 @@ const toggleButtonState = {
 };
 
 const controlRigController = new DoubleGrabController(controlRig, {
-  proximity: 0.16,
+  proximity: 0.055,
+  intersectionPadding: 0.03,
   minScale: 0.45,
   maxScale: 2.5,
   onReadyChange: (ready) => {
