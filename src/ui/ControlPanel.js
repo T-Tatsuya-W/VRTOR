@@ -36,22 +36,22 @@ export class ControlPanel {
     this.overlayDirty = true;
 
     this.panelMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0c1f2b,
-      emissive: 0x062b3f,
-      emissiveIntensity: 0.35,
+      color: 0x132f41,
+      emissive: 0x0b3c57,
+      emissiveIntensity: 0.4,
       metalness: 0.2,
-      roughness: 0.65,
-      transparent: true,
-      opacity: 0.9,
+      roughness: 0.55,
       side: THREE.DoubleSide
     });
     this.panelMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.44), this.panelMaterial);
     this.group.add(this.panelMesh);
 
-    const frameMaterial = new THREE.MeshBasicMaterial({
-      color: 0x031018,
-      transparent: true,
-      opacity: 0.35,
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x050f16,
+      emissive: 0x050f16,
+      emissiveIntensity: 0.3,
+      metalness: 0.25,
+      roughness: 0.7,
       side: THREE.DoubleSide
     });
     this.frameMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.48), frameMaterial);

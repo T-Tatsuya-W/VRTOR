@@ -89,7 +89,6 @@ export class RotarySelectorControl {
         emissiveIntensity: 0.25,
         metalness: 0.34,
         roughness: 0.58,
-        transparent: true,
         side: THREE.DoubleSide
       });
 

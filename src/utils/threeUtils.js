@@ -49,7 +49,7 @@ export function createLabelSprite(message, options = {}) {
   return sprite;
 }
 
-export function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
+export function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight, options = {}) {
   if (!text) {
     return y;
   }
@@ -59,22 +59,47 @@ export function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
     return y;
   }
 
-  let line = '';
-  let cursorY = y;
+  const { maxLines = Infinity, maxHeight = Infinity, ellipsis = true } = options ?? {};
+  const lines = [];
+  let current = '';
 
   for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (ctx.measureText(candidate).width > maxWidth && line) {
-      ctx.fillText(line, x, cursorY);
-      line = word;
-      cursorY += lineHeight;
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
     } else {
-      line = candidate;
+      current = candidate;
     }
   }
 
-  if (line) {
-    ctx.fillText(line, x, cursorY);
+  if (current) {
+    lines.push(current);
+  }
+
+  const maxHeightLines = Number.isFinite(maxHeight) && lineHeight > 0
+    ? Math.max(Math.floor(maxHeight / lineHeight), 0)
+    : Infinity;
+  const allowedLines = Math.min(lines.length, maxLines ?? Infinity, maxHeightLines);
+
+  if (allowedLines === 0) {
+    return y;
+  }
+
+  const truncated = allowedLines < lines.length && ellipsis;
+  if (truncated) {
+    const lastIndex = allowedLines - 1;
+    let base = lines[lastIndex];
+    const ellipsisChar = '…';
+    while (base.length > 0 && ctx.measureText(`${base}${ellipsisChar}`).width > maxWidth) {
+      base = base.slice(0, -1);
+    }
+    lines[lastIndex] = `${base}${ellipsisChar}`;
+  }
+
+  let cursorY = y;
+  for (let index = 0; index < allowedLines; index += 1) {
+    ctx.fillText(lines[index], x, cursorY);
     cursorY += lineHeight;
   }
 

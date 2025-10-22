@@ -37,22 +37,22 @@ export class SoundPanel {
     this.dirty = true;
 
     this.panelMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0c1f2b,
-      emissive: 0x062b3f,
-      emissiveIntensity: 0.45,
+      color: 0x132f41,
+      emissive: 0x0b3c57,
+      emissiveIntensity: 0.48,
       metalness: 0.25,
-      roughness: 0.62,
-      transparent: true,
-      opacity: 0.92,
+      roughness: 0.55,
       side: THREE.DoubleSide
     });
     this.panelMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.66), this.panelMaterial);
     this.group.add(this.panelMesh);
 
-    const frameMaterial = new THREE.MeshBasicMaterial({
-      color: 0x031018,
-      transparent: true,
-      opacity: 0.35,
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x050f16,
+      emissive: 0x050f16,
+      emissiveIntensity: 0.3,
+      metalness: 0.25,
+      roughness: 0.7,
       side: THREE.DoubleSide
     });
     this.frameMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.7), frameMaterial);
@@ -67,10 +67,7 @@ export class SoundPanel {
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.magFilter = THREE.LinearFilter;
 
-    const graphMaterial = new THREE.MeshBasicMaterial({
-      map: this.texture,
-      transparent: true
-    });
+    const graphMaterial = new THREE.MeshBasicMaterial({ map: this.texture });
     graphMaterial.depthTest = false;
     graphMaterial.depthWrite = false;
     this.graphMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.62), graphMaterial);
@@ -134,10 +131,10 @@ export class SoundPanel {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const ready = this.state.ready;
-    ctx.fillStyle = ready ? 'rgba(0, 32, 42, 0.82)' : 'rgba(8, 26, 38, 0.62)';
+    ctx.fillStyle = ready ? '#073545' : '#071824';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.strokeStyle = ready ? 'rgba(0, 255, 204, 0.85)' : 'rgba(0, 255, 204, 0.28)';
+    ctx.strokeStyle = ready ? '#00ffcc' : '#0f3a44';
     ctx.lineWidth = ready ? 12 : 6;
     ctx.strokeRect(18, 18, canvas.width - 36, canvas.height - 36);
 
@@ -156,10 +153,10 @@ export class SoundPanel {
     const graphWidth = canvas.width - graphLeft * 2;
     const graphHeight = 200;
 
-    ctx.fillStyle = 'rgba(3, 24, 33, 0.72)';
+    ctx.fillStyle = '#0a2431';
     ctx.fillRect(graphLeft, graphTop, graphWidth, graphHeight);
 
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.16)';
+    ctx.strokeStyle = '#134d4c';
     ctx.lineWidth = 2;
     const horizontalDivisions = 4;
     for (let i = 1; i < horizontalDivisions; i += 1) {
@@ -185,7 +182,7 @@ export class SoundPanel {
       ctx.lineTo(graphLeft + graphWidth, graphTop + graphHeight);
       ctx.lineTo(graphLeft, graphTop + graphHeight);
       ctx.closePath();
-      ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
+      ctx.fillStyle = 'rgba(0, 255, 204, 0.3)';
       ctx.fill();
       ctx.lineWidth = 4;
       ctx.strokeStyle = '#00ffcc';
@@ -197,7 +194,7 @@ export class SoundPanel {
     ctx.font = '600 40px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     ctx.fillText(`Level: ${percent}%`, 48, graphTop + graphHeight + 36);
 
-    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
+    ctx.fillStyle = '#d2ebff';
     ctx.font = '500 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     ctx.fillText(`RMS: ${this.state.rms.toFixed(3)}`, 320, graphTop + graphHeight + 36);
 

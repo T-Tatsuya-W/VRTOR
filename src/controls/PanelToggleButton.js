@@ -44,8 +44,8 @@ export class PanelToggleButton {
       releaseThreshold,
       contactPadding: 0.012,
       depthBias: 0.003,
-      metalness: 0.45,
-      roughness: 0.38
+      metalness: 0.08,
+      roughness: 0.85
     });
 
     this.colors = {

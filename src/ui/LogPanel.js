@@ -9,7 +9,7 @@ export class LogPanel {
     this.ctx = this.canvas.getContext('2d');
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.minFilter = THREE.LinearFilter;
-    this.material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true });
+    this.material = new THREE.MeshBasicMaterial({ map: this.texture });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.material);
     this.lines = [];
     this.highlighted = false;
@@ -40,11 +40,11 @@ export class LogPanel {
   render() {
     const { ctx } = this;
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.fillStyle = this.highlighted ? 'rgba(0, 32, 42, 0.82)' : 'rgba(0, 0, 0, 0.68)';
+    ctx.fillStyle = this.highlighted ? '#073545' : '#050b11';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     if (this.highlighted) {
-      ctx.strokeStyle = 'rgba(0, 255, 204, 0.85)';
+      ctx.strokeStyle = '#00ffcc';
       ctx.lineWidth = 12;
       ctx.strokeRect(6, 6, this.canvas.width - 12, this.canvas.height - 12);
     }
