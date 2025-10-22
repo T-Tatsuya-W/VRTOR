@@ -1861,6 +1861,12 @@ class VRTorApp {
     this.pinchTelemetry = { L: null, R: null };
     this.systemMessages = [];
     this.singlePressResetTimeout = null;
+    this.torusMovable = false;
+    this.torusMaterial = null;
+    this.torusGroup = null;
+    this.torusController = null;
+    this.torusMesh = null;
+    this.torusPanel = null;
 
     this.setupEnvironment();
     this.setupHands();
@@ -1882,9 +1888,10 @@ class VRTorApp {
     grid.position.y = 0;
     this.scene.add(grid);
 
-    const torusMaterial = new THREE.MeshStandardMaterial({
+    this.torusMaterial = new THREE.MeshStandardMaterial({
       color: 0x55ffee,
       emissive: 0x08263a,
+      emissiveIntensity: 0.35,
       metalness: 0.35,
       roughness: 0.15,
       transparent: true,
@@ -1893,10 +1900,13 @@ class VRTorApp {
       depthWrite: false
     });
 
-    const torus = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 64, 128), torusMaterial);
-    torus.position.set(0, 1.5, 0);
-    torus.rotation.x = Math.PI / 2;
-    this.scene.add(torus);
+    this.torusGroup = new THREE.Group();
+    this.torusGroup.position.set(0, 1.5, 0);
+    this.scene.add(this.torusGroup);
+
+    this.torusMesh = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 64, 128), this.torusMaterial);
+    this.torusMesh.rotation.x = Math.PI / 2;
+    this.torusGroup.add(this.torusMesh);
 
     const torusLabel = createLabelSprite('VRTOR', {
       width: 0.38,
@@ -1906,12 +1916,21 @@ class VRTorApp {
       renderOrder: 15,
       depthTest: false
     });
-    const torusParams = torus.geometry.parameters;
+    const torusParams = this.torusMesh.geometry.parameters;
     const torusLabelOffset = torusParams.radius - torusParams.tube * 0.5;
     torusLabel.position.set(0, 0, torusLabelOffset);
     torusLabel.material.depthTest = false;
     torusLabel.material.depthWrite = false;
-    torus.add(torusLabel);
+    this.torusMesh.add(torusLabel);
+
+    this.torusController = new DoubleGrabController(this.torusGroup, {
+      proximity: 0.075,
+      intersectionPadding: 0.04,
+      minScale: 0.45,
+      maxScale: 2.5,
+      onReadyChange: (ready) => this.updateTorusHighlight(ready)
+    });
+    this.updateTorusHighlight(false);
   }
 
   setupHands() {
@@ -1950,10 +1969,18 @@ class VRTorApp {
     this.logCluster = new LogCluster();
     this.scene.add(this.logCluster.group);
 
-    this.controlPanel = new ControlPanel();
+    this.controlPanel = new ControlPanel({ header: 'Example Controls' });
     this.scene.add(this.controlPanel.group);
 
+    this.torusPanel = new ControlPanel({
+      position: new THREE.Vector3(0.58, 1.25, -1.05),
+      rotation: new THREE.Euler(0, -Math.PI / 8, 0),
+      header: 'Torus Controls'
+    });
+    this.scene.add(this.torusPanel.group);
+
     this.configureControlPanel();
+    this.configureTorusPanel();
   }
 
   configureControlPanel() {
@@ -2032,6 +2059,57 @@ class VRTorApp {
     });
   }
 
+  configureTorusPanel() {
+    this.torusPanel.addToggleButton({
+      id: 'torusMovement',
+      position: new THREE.Vector3(0, -0.03, 0.06),
+      toggleOptions: {
+        offColor: 0x4b6070,
+        offActiveColor: 0x6f8294,
+        onColor: 0x4dffc3,
+        onActiveColor: 0x8dffe0,
+        emissiveColor: 0x062b3f,
+        activationThreshold: 0.95,
+        releaseThreshold: 0.35
+      },
+      overlay: {
+        title: 'Torus Movement',
+        valueLabel: 'Mode',
+        hint: 'Enable double-hand grip for the torus',
+        onValue: 'movable torus',
+        offValue: 'locked torus',
+        onAccent: '#00ffcc',
+        offAccent: '#ff9ebd'
+      },
+      onToggle: (toggled) => {
+        this.setTorusMovable(toggled);
+        this.recordSystemMessage(`Torus mode: ${toggled ? 'movable torus' : 'locked torus'}`);
+      }
+    });
+  }
+
+  setTorusMovable(enabled) {
+    const next = Boolean(enabled);
+    if (this.torusMovable === next) {
+      this.updateTorusHighlight(this.torusController?.highlighted ?? false);
+      return;
+    }
+    this.torusMovable = next;
+    if (!this.torusMovable && this.torusController) {
+      this.torusController.release();
+    }
+    this.updateTorusHighlight(this.torusController?.highlighted ?? false);
+  }
+
+  updateTorusHighlight(ready) {
+    if (!this.torusMaterial) return;
+    if (!this.torusMovable) {
+      this.torusMaterial.emissiveIntensity = 0.35;
+      return;
+    }
+    this.torusMaterial.emissiveIntensity = ready ? 1.05 : 0.6;
+  }
+
   recordSystemMessage(message) {
     this.systemMessages.unshift(message);
     this.systemMessages.splice(12);
@@ -2065,6 +2143,17 @@ class VRTorApp {
     const throttleResult = controlResults.throttle ?? null;
     const rotaryResult = controlResults.rotary ?? null;
 
+    const torusPanelStatus = this.torusPanel.update(leftState, rightState, delta);
+
+    let torusInteraction = null;
+    if (this.torusController) {
+      if (this.torusMovable) {
+        torusInteraction = this.torusController.update(leftState, rightState);
+      } else {
+        this.torusController.release();
+      }
+    }
+
     const throttlePercent = throttleResult ? Math.round(throttleResult.value * 100) : 0;
     const rotaryLabel = rotaryResult?.selectedLabel ?? '—';
 
@@ -2084,7 +2173,8 @@ class VRTorApp {
       `Single press ready: ${this.controlPanel.ready ? 'YES' : 'no'}`,
       `Toggle button: ${toggleResult?.toggled ? 'ON' : 'OFF'}`,
       `Throttle lever: ${throttlePercent}% (${(throttleResult?.value ?? 0).toFixed(2)})`,
-      `Gear selector: ${rotaryLabel}`
+      `Gear selector: ${rotaryLabel}`,
+      `Torus mode: ${this.torusMovable ? 'movable torus' : 'locked torus'}`
     );
 
     const statusLines = [];
@@ -2094,12 +2184,18 @@ class VRTorApp {
     if (panelStatus?.grabbing) {
       statusLines.push('Moving control panel…');
     }
+    if (torusPanelStatus?.grabbing) {
+      statusLines.push('Moving torus control panel…');
+    }
     if (throttleResult?.activeHand) {
       const throttleHandLabel = throttleResult.activeHand === 'L' ? 'left' : 'right';
       statusLines.push(`Adjusting throttle lever (${throttleHandLabel} hand)…`);
     }
     if (rotaryResult?.grabbing) {
       statusLines.push('Rotating gear selector…');
+    }
+    if (this.torusMovable && torusInteraction?.grabbing) {
+      statusLines.push('Manipulating torus…', `Scale ×${this.torusGroup.scale.x.toFixed(2)}`);
     }
     if (statusLines.length > 0) {
       generalLines.push('—', ...statusLines);
