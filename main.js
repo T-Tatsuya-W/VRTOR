@@ -397,6 +397,9 @@ class ControlPanelOverlay {
       toggleLabel: 'Toggle Button',
       toggleStatus: 'OFF',
       toggleHint: 'Alternate colour each tap',
+      sliderLabel: 'Throttle Lever',
+      sliderValue: '40%',
+      sliderHint: 'Grab the handle and move to choose a value',
       highlighted: false
     };
     this.render();
@@ -456,6 +459,26 @@ class ControlPanelOverlay {
     ctx.font = '500 26px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
     drawWrappedText(ctx, this.state.toggleHint, rightColumnX, statusY + 40, columnWidth, 30);
+
+    ctx.beginPath();
+    ctx.moveTo(24, 226);
+    ctx.lineTo(canvas.width - 24, 226);
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.25)';
+    ctx.stroke();
+
+    const sliderY = 240;
+    ctx.textAlign = 'left';
+    ctx.font = '600 32px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillStyle = '#f1f6ff';
+    ctx.fillText(this.state.sliderLabel, leftColumnX, sliderY);
+
+    ctx.font = '600 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillStyle = '#00ffcc';
+    ctx.fillText(`Value: ${this.state.sliderValue}`, leftColumnX, sliderY + 38);
+
+    ctx.font = '500 24px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
+    drawWrappedText(ctx, this.state.sliderHint, leftColumnX, sliderY + 72, canvas.width - 64, 28);
 
     this.texture.needsUpdate = true;
   }
@@ -900,6 +923,74 @@ const toggleButtonState = {
   halfExtents: toggleButtonHalfExtents
 };
 
+const throttleLeverGroup = new THREE.Group();
+throttleLeverGroup.position.set(0, 0.14, 0.065);
+controlRig.add(throttleLeverGroup);
+
+const throttleTrackMaterial = new THREE.MeshStandardMaterial({
+  color: 0x10465a,
+  emissive: 0x022130,
+  emissiveIntensity: 0.45,
+  metalness: 0.5,
+  roughness: 0.38,
+  transparent: true,
+  opacity: 0.92
+});
+const throttleTrack = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.34, 0.045), throttleTrackMaterial);
+throttleLeverGroup.add(throttleTrack);
+
+const throttleBackplate = new THREE.Mesh(
+  new THREE.BoxGeometry(0.22, 0.04, 0.18),
+  new THREE.MeshStandardMaterial({
+    color: 0x082735,
+    emissive: 0x04121b,
+    emissiveIntensity: 0.25,
+    metalness: 0.35,
+    roughness: 0.6,
+    transparent: true,
+    opacity: 0.9
+  })
+);
+throttleBackplate.position.set(0, -0.18, -0.02);
+throttleBackplate.rotation.x = -Math.PI / 2;
+throttleLeverGroup.add(throttleBackplate);
+
+const throttleHandleMaterial = new THREE.MeshStandardMaterial({
+  color: 0x4dffc3,
+  emissive: 0x0b382d,
+  emissiveIntensity: 0.95,
+  metalness: 0.52,
+  roughness: 0.28
+});
+const throttleHandle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), throttleHandleMaterial);
+throttleHandle.position.set(0, 0, 0.065);
+throttleLeverGroup.add(throttleHandle);
+
+const throttleLeverState = {
+  group: throttleLeverGroup,
+  handle: throttleHandle,
+  trackMaterial: throttleTrackMaterial,
+  handleMaterial: throttleHandleMaterial,
+  minPosition: -0.15,
+  maxPosition: 0.15,
+  currentValue: 0.4,
+  targetValue: 0.4,
+  damping: 16,
+  ready: false,
+  grabbedBy: null,
+  grabOffset: 0,
+  grabPadding: 0.03,
+  bounding: new THREE.Box3(),
+  paddedBounding: new THREE.Box3()
+};
+
+const initialThrottleY = THREE.MathUtils.lerp(
+  throttleLeverState.minPosition,
+  throttleLeverState.maxPosition,
+  throttleLeverState.currentValue
+);
+throttleHandle.position.y = initialThrottleY;
+
 const controlRigController = new DoubleGrabController(controlRig, {
   proximity: 0.055,
   intersectionPadding: 0.03,
@@ -909,11 +1000,19 @@ const controlRigController = new DoubleGrabController(controlRig, {
     controlPanelMaterial.emissiveIntensity = ready ? 0.9 : 0.35;
     controlButtonState.ready = ready;
     toggleButtonState.ready = ready;
+    throttleLeverState.ready = ready;
     controlPanelOverlay.update({ highlighted: ready });
+    throttleLeverState.handleMaterial.emissiveIntensity = ready ? 1.15 : 0.65;
+    throttleLeverState.trackMaterial.emissiveIntensity = ready ? 0.75 : 0.4;
+    if (!ready) {
+      throttleLeverState.grabbedBy = null;
+      throttleLeverState.grabOffset = 0;
+    }
   }
 });
 
 const buttonWorkVector = new THREE.Vector3();
+const throttleGroupWorkVector = new THREE.Vector3();
 
 function computeButtonTargetDepth(button, state, handStates) {
   const halfExtents = state.halfExtents;
@@ -973,6 +1072,105 @@ function updatePanelButton(button, state, leftState, rightState, delta) {
     : 0;
 }
 
+function getThrottleValueFromLocalY(state, localY) {
+  const range = state.maxPosition - state.minPosition;
+  if (range <= 0) {
+    return 0;
+  }
+  const normalized = (localY - state.minPosition) / range;
+  return THREE.MathUtils.clamp(normalized, 0, 1);
+}
+
+function updateThrottleLever(state, leftState, rightState, delta) {
+  if (!state?.group || !state?.handle) {
+    return null;
+  }
+
+  const participants = [
+    { label: 'L', data: leftState },
+    { label: 'R', data: rightState }
+  ];
+
+  state.group.updateWorldMatrix(true, false);
+  state.handle.updateWorldMatrix(true, false);
+  state.bounding.setFromObject(state.handle);
+  state.paddedBounding.copy(state.bounding).expandByScalar(state.grabPadding ?? 0.03);
+
+  if (!state.ready) {
+    state.grabbedBy = null;
+    state.grabOffset = 0;
+  }
+
+  if (state.grabbedBy) {
+    const active = participants.find((entry) => entry.label === state.grabbedBy);
+    const pinchActive = Boolean(
+      active?.data?.visible &&
+        active.data.pinch?.active &&
+        active.data.pinch.position
+    );
+    if (!pinchActive) {
+      state.grabbedBy = null;
+      state.grabOffset = 0;
+    }
+  }
+
+  if (!state.grabbedBy && state.ready) {
+    for (const entry of participants) {
+      const pinch = entry.data?.pinch ?? null;
+      if (!entry.data?.visible || !pinch?.active || !pinch.position) continue;
+      if (!state.paddedBounding.containsPoint(pinch.position)) continue;
+      throttleGroupWorkVector.copy(pinch.position);
+      state.group.worldToLocal(throttleGroupWorkVector);
+      const pinchValue = getThrottleValueFromLocalY(state, throttleGroupWorkVector.y);
+      state.grabbedBy = entry.label;
+      state.grabOffset = pinchValue - state.currentValue;
+      break;
+    }
+  }
+
+  if (state.grabbedBy) {
+    const active = participants.find((entry) => entry.label === state.grabbedBy);
+    const pinch = active?.data?.pinch ?? null;
+    if (pinch?.position) {
+      throttleGroupWorkVector.copy(pinch.position);
+      state.group.worldToLocal(throttleGroupWorkVector);
+      const pinchValue = getThrottleValueFromLocalY(state, throttleGroupWorkVector.y);
+      state.targetValue = THREE.MathUtils.clamp(pinchValue - state.grabOffset, 0, 1);
+    }
+  } else {
+    state.targetValue = THREE.MathUtils.clamp(state.targetValue, 0, 1);
+  }
+
+  const damping = state.damping ?? 16;
+  state.currentValue = THREE.MathUtils.damp(state.currentValue, state.targetValue, damping, delta);
+  if (Math.abs(state.currentValue - state.targetValue) < 1e-4) {
+    state.currentValue = state.targetValue;
+  }
+
+  const handleY = THREE.MathUtils.lerp(state.minPosition, state.maxPosition, state.currentValue);
+  state.handle.position.y = handleY;
+  state.handle.rotation.x = THREE.MathUtils.degToRad(
+    THREE.MathUtils.lerp(-18, 10, state.currentValue)
+  );
+  state.handle.updateMatrix();
+  state.handle.updateMatrixWorld(true);
+  state.bounding.setFromObject(state.handle);
+  state.paddedBounding.copy(state.bounding).expandByScalar(state.grabPadding ?? 0.03);
+
+  const trackIntensity = state.ready ? 0.45 + state.currentValue * 0.4 : 0.35;
+  const handleIntensity = state.ready
+    ? 1 + state.currentValue * 0.5 + (state.grabbedBy ? 0.4 : 0)
+    : 0.6;
+  if (state.trackMaterial) {
+    state.trackMaterial.emissiveIntensity = trackIntensity;
+  }
+  if (state.handleMaterial) {
+    state.handleMaterial.emissiveIntensity = handleIntensity;
+  }
+
+  return state.grabbedBy;
+}
+
 const clock = new THREE.Clock();
 
 renderer.setAnimationLoop(() => {
@@ -1003,6 +1201,18 @@ renderer.setAnimationLoop(() => {
     rightState,
     delta
   );
+  const throttleActiveHand = updateThrottleLever(
+    throttleLeverState,
+    leftState,
+    rightState,
+    delta
+  );
+
+  const throttlePercent = Math.round(throttleLeverState.currentValue * 100);
+  const sliderValueText = throttleActiveHand
+    ? `${throttlePercent}% · ${throttleActiveHand === 'L' ? 'Left' : 'Right'} hand`
+    : `${throttlePercent}%`;
+  controlPanelOverlay.update({ sliderValue: sliderValueText });
 
   if (controlPressRatio >= controlButtonState.activationThreshold) {
     if (!controlButtonState.latched) {
@@ -1064,7 +1274,8 @@ renderer.setAnimationLoop(() => {
 
   generalLines.push(
     `Single press ready: ${controlButtonState.ready ? 'YES' : 'no'}`,
-    `Toggle button: ${toggleButtonState.toggled ? 'ON' : 'OFF'}`
+    `Toggle button: ${toggleButtonState.toggled ? 'ON' : 'OFF'}`,
+    `Throttle lever: ${throttlePercent}% (${throttleLeverState.currentValue.toFixed(2)})`
   );
 
   const statusLines = [];
@@ -1073,6 +1284,10 @@ renderer.setAnimationLoop(() => {
   }
   if (controlRigStatus.grabbing) {
     statusLines.push('Moving control panel…');
+  }
+  if (throttleActiveHand) {
+    const throttleHandLabel = throttleActiveHand === 'L' ? 'left' : 'right';
+    statusLines.push(`Adjusting throttle lever (${throttleHandLabel} hand)…`);
   }
   if (statusLines.length > 0) {
     generalLines.push('—', ...statusLines);
