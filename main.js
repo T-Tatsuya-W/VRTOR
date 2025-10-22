@@ -376,10 +376,10 @@ class LogPanel {
 }
 
 class ControlPanelOverlay {
-  constructor({ width = 0.64, height = 0.38 } = {}) {
+  constructor({ width = 1.08, height = 0.44 } = {}) {
     this.canvas = document.createElement('canvas');
-    this.canvas.width = 512;
-    this.canvas.height = 320;
+    this.canvas.width = 1024;
+    this.canvas.height = 384;
     this.ctx = this.canvas.getContext('2d');
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.minFilter = THREE.LinearFilter;
@@ -400,6 +400,9 @@ class ControlPanelOverlay {
       sliderLabel: 'Throttle Lever',
       sliderValue: '40%',
       sliderHint: 'Grab the handle and move to choose a value',
+      rotaryLabel: 'Gear Selector',
+      rotaryValue: 'Apple',
+      rotaryHint: 'Rotate the cog to browse the list',
       highlighted: false
     };
     this.render();
@@ -426,61 +429,816 @@ class ControlPanelOverlay {
     ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
 
     ctx.fillStyle = '#d1f8ff';
-    ctx.font = '700 44px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.font = '700 48px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
-    ctx.fillText(this.state.header, 32, 32);
+    ctx.fillText(this.state.header, 32, 36);
 
-    ctx.font = '600 32px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    ctx.fillStyle = '#f1f6ff';
-    const leftColumnX = 32;
-    const rightColumnX = canvas.width * 0.5 + 24;
-    const columnWidth = canvas.width * 0.5 - 56;
-    ctx.fillText(this.state.singleLabel, leftColumnX, 132);
-    ctx.fillText(this.state.toggleLabel, rightColumnX, 132);
+    const columnCount = 4;
+    const columnWidth = (canvas.width - 64) / columnCount;
+    const contentY = 132;
 
-    ctx.font = '500 26px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
-    drawWrappedText(ctx, this.state.singleHint, leftColumnX, 180, columnWidth, 30);
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.18)';
+    ctx.lineWidth = 3;
+    for (let i = 1; i < columnCount; i += 1) {
+      const x = 32 + columnWidth * i;
+      ctx.beginPath();
+      ctx.moveTo(x, 112);
+      ctx.lineTo(x, canvas.height - 36);
+      ctx.stroke();
+    }
 
-    ctx.font = '600 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    const toggleActive = this.state.toggleStatus === 'ON';
-    ctx.fillStyle = toggleActive ? '#00ffcc' : '#ff9ebd';
-    const statusText = `State: ${this.state.toggleStatus}`;
-    const statusY = 180;
-    ctx.fillText(statusText, rightColumnX, statusY);
+    const columns = [
+      {
+        title: this.state.singleLabel,
+        valueLabel: 'Action',
+        value: 'Tap to log an event',
+        accent: '#00d4ff',
+        hint: this.state.singleHint
+      },
+      {
+        title: this.state.toggleLabel,
+        valueLabel: 'State',
+        value: this.state.toggleStatus,
+        accent: this.state.toggleStatus === 'ON' ? '#00ffcc' : '#ff9ebd',
+        hint: this.state.toggleHint
+      },
+      {
+        title: this.state.sliderLabel,
+        valueLabel: 'Value',
+        value: this.state.sliderValue,
+        accent: '#00ffcc',
+        hint: this.state.sliderHint
+      },
+      {
+        title: this.state.rotaryLabel,
+        valueLabel: 'Selected',
+        value: this.state.rotaryValue,
+        accent: '#ffd27a',
+        hint: this.state.rotaryHint
+      }
+    ];
 
-    ctx.beginPath();
-    ctx.moveTo(canvas.width * 0.5, 110);
-    ctx.lineTo(canvas.width * 0.5, canvas.height - 32);
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.25)';
-    ctx.stroke();
+    columns.forEach((column, index) => {
+      const x = 32 + columnWidth * index;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#f1f6ff';
+      ctx.font = '600 34px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+      ctx.fillText(column.title, x, contentY);
 
-    ctx.font = '500 26px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
-    drawWrappedText(ctx, this.state.toggleHint, rightColumnX, statusY + 40, columnWidth, 30);
+      ctx.font = '600 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+      ctx.fillStyle = column.accent;
+      const line = `${column.valueLabel}: ${column.value}`;
+      ctx.fillText(line, x, contentY + 46);
 
-    ctx.beginPath();
-    ctx.moveTo(24, 226);
-    ctx.lineTo(canvas.width - 24, 226);
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.25)';
-    ctx.stroke();
-
-    const sliderY = 240;
-    ctx.textAlign = 'left';
-    ctx.font = '600 32px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    ctx.fillStyle = '#f1f6ff';
-    ctx.fillText(this.state.sliderLabel, leftColumnX, sliderY);
-
-    ctx.font = '600 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    ctx.fillStyle = '#00ffcc';
-    ctx.fillText(`Value: ${this.state.sliderValue}`, leftColumnX, sliderY + 38);
-
-    ctx.font = '500 24px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
-    drawWrappedText(ctx, this.state.sliderHint, leftColumnX, sliderY + 72, canvas.width - 64, 28);
+      ctx.font = '500 24px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+      ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
+      drawWrappedText(ctx, column.hint, x, contentY + 86, columnWidth - 32, 30);
+    });
 
     this.texture.needsUpdate = true;
+  }
+}
+
+const buttonWorkVector = new THREE.Vector3();
+
+class PanelButton {
+  constructor({
+    size = { width: 0.24, height: 0.1, depth: 0.1 },
+    position = new THREE.Vector3(),
+    baseColor = 0x3ab0ff,
+    activeColor = 0xff7f9e,
+    emissiveColor = 0x001c38,
+    emissiveConfig = { idle: 0.45, ready: 0.95, activeScale: 1.05 },
+    maxPressDepth = 0.045,
+    damping = 18,
+    activationThreshold = 0.95,
+    releaseThreshold = 0.2,
+    contactPadding = 0.012,
+    depthBias = 0.003,
+    metalness = 0.45,
+    roughness = 0.4
+  } = {}) {
+    this.colors = {
+      base: new THREE.Color(baseColor),
+      active: new THREE.Color(activeColor)
+    };
+    this.emissiveColor = new THREE.Color(emissiveColor);
+    this.emissiveConfig = {
+      idle: emissiveConfig?.idle ?? 0.45,
+      ready: emissiveConfig?.ready ?? 0.95,
+      activeScale: emissiveConfig?.activeScale ?? 1.05
+    };
+
+    const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
+    this.material = new THREE.MeshStandardMaterial({
+      color: this.colors.base.clone(),
+      emissive: this.emissiveColor.clone(),
+      emissiveIntensity: this.emissiveConfig.idle,
+      metalness,
+      roughness
+    });
+    this.mesh = new THREE.Mesh(geometry, this.material);
+    if (position instanceof THREE.Vector3) {
+      this.mesh.position.copy(position);
+    } else if (Array.isArray(position)) {
+      this.mesh.position.fromArray(position);
+    } else if (position && typeof position === 'object') {
+      this.mesh.position.set(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+    }
+
+    this.mesh.geometry.computeBoundingBox();
+    const halfExtents = new THREE.Vector3();
+    this.mesh.geometry.boundingBox.getSize(halfExtents).multiplyScalar(0.5);
+
+    this.state = {
+      restZ: this.mesh.position.z,
+      maxPressDepth,
+      currentDepth: 0,
+      targetDepth: 0,
+      damping,
+      activationThreshold,
+      releaseThreshold,
+      latched: false,
+      ready: false,
+      contactPadding,
+      depthBias,
+      halfExtents
+    };
+  }
+
+  setColors(base, active) {
+    if (base !== undefined) {
+      this.colors.base.copy(base instanceof THREE.Color ? base : new THREE.Color(base));
+    }
+    if (active !== undefined) {
+      this.colors.active.copy(active instanceof THREE.Color ? active : new THREE.Color(active));
+    }
+    this.material.color.copy(this.colors.base);
+  }
+
+  setEmissiveConfig({ idle, ready, activeScale } = {}) {
+    this.emissiveConfig = {
+      idle: idle ?? this.emissiveConfig.idle,
+      ready: ready ?? this.emissiveConfig.ready,
+      activeScale: activeScale ?? this.emissiveConfig.activeScale
+    };
+    const ratio = this.state.maxPressDepth > 0
+      ? THREE.MathUtils.clamp(this.state.currentDepth / this.state.maxPressDepth, 0, 1)
+      : 0;
+    this.updateEmissiveIntensity(ratio);
+  }
+
+  updateEmissiveIntensity(ratio) {
+    const base = this.state.ready ? this.emissiveConfig.ready : this.emissiveConfig.idle;
+    this.material.emissiveIntensity = base + ratio * this.emissiveConfig.activeScale;
+  }
+
+  setReady(ready) {
+    if (this.state.ready === ready) return;
+    this.state.ready = ready;
+    const ratio = this.state.maxPressDepth > 0
+      ? THREE.MathUtils.clamp(this.state.currentDepth / this.state.maxPressDepth, 0, 1)
+      : 0;
+    this.updateEmissiveIntensity(ratio);
+  }
+
+  update(leftState, rightState, delta) {
+    this.mesh.updateWorldMatrix(true, false);
+    const targetDepth = computeButtonTargetDepth(this.mesh, this.state, [leftState, rightState]);
+    this.state.targetDepth = targetDepth;
+    const damping = this.state.damping ?? 18;
+    this.state.currentDepth = THREE.MathUtils.damp(this.state.currentDepth, targetDepth, damping, delta);
+    if (Math.abs(this.state.currentDepth - targetDepth) < 1e-4) {
+      this.state.currentDepth = targetDepth;
+    }
+    this.state.currentDepth = THREE.MathUtils.clamp(this.state.currentDepth, 0, this.state.maxPressDepth);
+    this.mesh.position.z = this.state.restZ - this.state.currentDepth;
+    const ratio = this.state.maxPressDepth > 0
+      ? THREE.MathUtils.clamp(this.state.currentDepth / this.state.maxPressDepth, 0, 1)
+      : 0;
+    this.material.color.copy(this.colors.base).lerp(this.colors.active, ratio);
+    this.updateEmissiveIntensity(ratio);
+
+    const pressed = ratio >= this.state.activationThreshold;
+    let justActivated = false;
+    let justReleased = false;
+    if (pressed && !this.state.latched) {
+      this.state.latched = true;
+      justActivated = true;
+    } else if (!pressed && this.state.latched && ratio <= this.state.releaseThreshold) {
+      this.state.latched = false;
+      justReleased = true;
+    }
+
+    return { ratio, pressed, justActivated, justReleased };
+  }
+}
+
+class PanelToggleButton {
+  constructor({
+    position = new THREE.Vector3(),
+    offColor = 0xff5fa2,
+    offActiveColor = 0xff8cc4,
+    onColor = 0x4dffc3,
+    onActiveColor = 0x8dffe0,
+    emissiveColor = 0x3a001f,
+    emissiveConfig = {
+      off: { idle: 0.4, ready: 0.6, activeScale: 0.9 },
+      on: { idle: 0.6, ready: 1, activeScale: 0.9 }
+    },
+    activationThreshold = 0.95,
+    releaseThreshold = 0.35,
+    onToggle = null
+  } = {}) {
+    const mergedEmissive = {
+      off: {
+        idle: 0.4,
+        ready: 0.6,
+        activeScale: 0.9,
+        ...(emissiveConfig?.off ?? {})
+      },
+      on: {
+        idle: 0.6,
+        ready: 1,
+        activeScale: 0.9,
+        ...(emissiveConfig?.on ?? {})
+      }
+    };
+
+    this.button = new PanelButton({
+      position,
+      baseColor: offColor,
+      activeColor: offActiveColor,
+      emissiveColor,
+      emissiveConfig: mergedEmissive.off,
+      maxPressDepth: 0.045,
+      damping: 18,
+      activationThreshold,
+      releaseThreshold,
+      contactPadding: 0.012,
+      depthBias: 0.003,
+      metalness: 0.45,
+      roughness: 0.38
+    });
+
+    this.colors = {
+      off: new THREE.Color(offColor),
+      offActive: new THREE.Color(offActiveColor),
+      on: new THREE.Color(onColor),
+      onActive: new THREE.Color(onActiveColor)
+    };
+    this.emissive = mergedEmissive;
+    this.toggled = false;
+    this.onToggle = onToggle;
+    this.updateAppearance();
+  }
+
+  get mesh() {
+    return this.button.mesh;
+  }
+
+  setReady(ready) {
+    this.button.setReady(ready);
+    this.updateAppearance();
+  }
+
+  setToggled(value) {
+    const next = Boolean(value);
+    if (this.toggled === next) return;
+    this.toggled = next;
+    this.updateAppearance();
+  }
+
+  updateAppearance() {
+    const base = this.toggled ? this.colors.on : this.colors.off;
+    const active = this.toggled ? this.colors.onActive : this.colors.offActive;
+    const emissiveConfig = this.toggled ? this.emissive.on : this.emissive.off;
+    this.button.setColors(base, active);
+    this.button.setEmissiveConfig(emissiveConfig);
+  }
+
+  update(leftState, rightState, delta) {
+    this.updateAppearance();
+    const result = this.button.update(leftState, rightState, delta);
+    if (result.justActivated) {
+      this.toggled = !this.toggled;
+      this.updateAppearance();
+      if (typeof this.onToggle === 'function') {
+        this.onToggle(this.toggled);
+      }
+    }
+    return { ...result, toggled: this.toggled };
+  }
+}
+
+class ThrottleLeverControl {
+  constructor({
+    position = new THREE.Vector3(),
+    initialValue = 0.4,
+    minPosition = -0.15,
+    maxPosition = 0.15,
+    grabPadding = 0.03,
+    damping = 16,
+    onValueChange = null
+  } = {}) {
+    this.group = new THREE.Group();
+    if (position instanceof THREE.Vector3) {
+      this.group.position.copy(position);
+    } else if (Array.isArray(position)) {
+      this.group.position.fromArray(position);
+    } else if (position && typeof position === 'object') {
+      this.group.position.set(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+    }
+
+    this.trackMaterial = new THREE.MeshStandardMaterial({
+      color: 0x10465a,
+      emissive: 0x022130,
+      emissiveIntensity: 0.45,
+      metalness: 0.5,
+      roughness: 0.38,
+      transparent: true,
+      opacity: 0.92
+    });
+    const track = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.34, 0.045), this.trackMaterial);
+    this.group.add(track);
+
+    const backplate = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.04, 0.18),
+      new THREE.MeshStandardMaterial({
+        color: 0x082735,
+        emissive: 0x04121b,
+        emissiveIntensity: 0.25,
+        metalness: 0.35,
+        roughness: 0.6,
+        transparent: true,
+        opacity: 0.9
+      })
+    );
+    backplate.position.set(0, -0.18, -0.02);
+    backplate.rotation.x = -Math.PI / 2;
+    this.group.add(backplate);
+
+    this.handleMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4dffc3,
+      emissive: 0x0b382d,
+      emissiveIntensity: 0.95,
+      metalness: 0.52,
+      roughness: 0.28
+    });
+    this.handle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), this.handleMaterial);
+    this.handle.position.set(0, 0, 0.065);
+    this.group.add(this.handle);
+
+    this.state = {
+      minPosition,
+      maxPosition,
+      currentValue: initialValue,
+      targetValue: initialValue,
+      damping,
+      ready: false,
+      grabbedBy: null,
+      grabOffset: 0,
+      grabPadding,
+      bounding: new THREE.Box3(),
+      paddedBounding: new THREE.Box3()
+    };
+    this.onValueChange = onValueChange;
+    this.lastReportedValue = initialValue;
+    this.workVector = new THREE.Vector3();
+
+    const initialY = THREE.MathUtils.lerp(minPosition, maxPosition, initialValue);
+    this.handle.position.y = initialY;
+    this.handle.rotation.x = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(-18, 10, initialValue));
+  }
+
+  setReady(ready) {
+    if (this.state.ready === ready) return;
+    this.state.ready = ready;
+    if (!ready) {
+      this.state.grabbedBy = null;
+      this.state.grabOffset = 0;
+    }
+    this.trackMaterial.emissiveIntensity = ready ? 0.75 : 0.4;
+    this.handleMaterial.emissiveIntensity = ready ? 1.15 : 0.65;
+  }
+
+  getValueFromLocalY(localY) {
+    const range = this.state.maxPosition - this.state.minPosition;
+    if (range <= 0) return 0;
+    const normalized = (localY - this.state.minPosition) / range;
+    return THREE.MathUtils.clamp(normalized, 0, 1);
+  }
+
+  update(leftState, rightState, delta) {
+    const participants = [
+      { label: 'L', data: leftState },
+      { label: 'R', data: rightState }
+    ];
+
+    this.group.updateWorldMatrix(true, false);
+    this.handle.updateWorldMatrix(true, false);
+    this.state.bounding.setFromObject(this.handle);
+    this.state.paddedBounding
+      .copy(this.state.bounding)
+      .expandByScalar(this.state.grabPadding ?? 0.03);
+
+    if (!this.state.ready) {
+      this.state.grabbedBy = null;
+      this.state.grabOffset = 0;
+    }
+
+    if (this.state.grabbedBy) {
+      const active = participants.find((entry) => entry.label === this.state.grabbedBy);
+      const pinch = active?.data?.pinch ?? null;
+      const pinchActive = Boolean(active?.data?.visible && pinch?.active && pinch?.position);
+      if (!pinchActive) {
+        this.state.grabbedBy = null;
+        this.state.grabOffset = 0;
+      }
+    }
+
+    if (!this.state.grabbedBy && this.state.ready) {
+      for (const entry of participants) {
+        const pinch = entry.data?.pinch ?? null;
+        if (!entry.data?.visible || !pinch?.active || !pinch.position) continue;
+        if (!this.state.paddedBounding.containsPoint(pinch.position)) continue;
+        this.workVector.copy(pinch.position);
+        this.group.worldToLocal(this.workVector);
+        const pinchValue = this.getValueFromLocalY(this.workVector.y);
+        this.state.grabbedBy = entry.label;
+        this.state.grabOffset = pinchValue - this.state.currentValue;
+        break;
+      }
+    }
+
+    if (this.state.grabbedBy) {
+      const active = participants.find((entry) => entry.label === this.state.grabbedBy);
+      const pinch = active?.data?.pinch ?? null;
+      if (pinch?.position) {
+        this.workVector.copy(pinch.position);
+        this.group.worldToLocal(this.workVector);
+        const pinchValue = this.getValueFromLocalY(this.workVector.y);
+        this.state.targetValue = THREE.MathUtils.clamp(pinchValue - this.state.grabOffset, 0, 1);
+      }
+    } else {
+      this.state.targetValue = THREE.MathUtils.clamp(this.state.targetValue, 0, 1);
+    }
+
+    const damping = this.state.damping ?? 16;
+    this.state.currentValue = THREE.MathUtils.damp(
+      this.state.currentValue,
+      this.state.targetValue,
+      damping,
+      delta
+    );
+    if (Math.abs(this.state.currentValue - this.state.targetValue) < 1e-4) {
+      this.state.currentValue = this.state.targetValue;
+    }
+
+    const handleY = THREE.MathUtils.lerp(
+      this.state.minPosition,
+      this.state.maxPosition,
+      this.state.currentValue
+    );
+    this.handle.position.y = handleY;
+    this.handle.rotation.x = THREE.MathUtils.degToRad(
+      THREE.MathUtils.lerp(-18, 10, this.state.currentValue)
+    );
+    this.handle.updateMatrix();
+    this.handle.updateMatrixWorld(true);
+    this.state.bounding.setFromObject(this.handle);
+    this.state.paddedBounding
+      .copy(this.state.bounding)
+      .expandByScalar(this.state.grabPadding ?? 0.03);
+
+    const trackIntensity = this.state.ready ? 0.45 + this.state.currentValue * 0.4 : 0.35;
+    const handleIntensity = this.state.ready
+      ? 1 + this.state.currentValue * 0.5 + (this.state.grabbedBy ? 0.4 : 0)
+      : 0.6;
+    this.trackMaterial.emissiveIntensity = trackIntensity;
+    this.handleMaterial.emissiveIntensity = handleIntensity;
+
+    if (typeof this.onValueChange === 'function') {
+      if (Math.abs(this.state.currentValue - this.lastReportedValue) > 1e-4) {
+        this.lastReportedValue = this.state.currentValue;
+        this.onValueChange(this.state.currentValue, this.state.grabbedBy);
+      }
+    }
+
+    return {
+      value: this.state.currentValue,
+      grabbing: Boolean(this.state.grabbedBy),
+      activeHand: this.state.grabbedBy
+    };
+  }
+}
+
+class RotarySelectorControl {
+  constructor({
+    position = new THREE.Vector3(),
+    labels = ['Apple', 'Banana', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig'],
+    onSelectionChange = null
+  } = {}) {
+    const defaults = ['Apple', 'Banana', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig'];
+    this.labels = Array.isArray(labels) && labels.length ? [...labels] : [...defaults];
+    this.onSelectionChange = onSelectionChange;
+    this.faceCount = 6;
+    if (this.labels.length < this.faceCount) {
+      const fallbacks = ['Guava', 'Honeydew', 'Kiwi', 'Lemon', 'Mango', 'Nectarine'];
+      let filler = 0;
+      while (this.labels.length < this.faceCount) {
+        this.labels.push(fallbacks[filler % fallbacks.length]);
+        filler += 1;
+      }
+    } else if (this.labels.length > this.faceCount) {
+      this.labels.length = this.faceCount;
+    }
+
+    this.segmentAngle = (Math.PI * 2) / this.faceCount;
+    this.geometryOffset = Math.PI / 3;
+
+    this.group = new THREE.Group();
+    if (position instanceof THREE.Vector3) {
+      this.group.position.copy(position);
+    } else if (Array.isArray(position)) {
+      this.group.position.fromArray(position);
+    } else if (position && typeof position === 'object') {
+      this.group.position.set(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+    }
+
+    this.pivot = new THREE.Group();
+    this.group.add(this.pivot);
+
+    this.barrelMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1c4d62,
+      emissive: 0x05202c,
+      emissiveIntensity: 0.4,
+      metalness: 0.55,
+      roughness: 0.42,
+      flatShading: true
+    });
+
+    const barrelGeometry = new THREE.CylinderGeometry(0.14, 0.14, 0.18, this.faceCount, 1, false);
+    barrelGeometry.rotateY(this.geometryOffset);
+    this.barrel = new THREE.Mesh(barrelGeometry, this.barrelMaterial);
+    this.barrel.castShadow = true;
+    this.barrel.receiveShadow = true;
+    this.pivot.add(this.barrel);
+
+    const edgeGeometry = new THREE.EdgesGeometry(barrelGeometry, 20);
+    const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x081821, linewidth: 1 });
+    const barrelEdges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+    this.barrel.add(barrelEdges);
+
+    this.axleMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0a1a21,
+      emissive: 0x02070b,
+      emissiveIntensity: 0.55,
+      metalness: 0.62,
+      roughness: 0.45
+    });
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.22, 32), this.axleMaterial);
+    this.pivot.add(axle);
+
+    this.faceRoot = new THREE.Group();
+    this.pivot.add(this.faceRoot);
+
+    this.faceMeshes = [];
+    this.faceTextureCache = new Map();
+    const faceWidth = 0.18;
+    const faceHeight = 0.16;
+    const faceRadius = 0.141;
+
+    for (let index = 0; index < this.faceCount; index += 1) {
+      const faceAngle = index * this.segmentAngle + this.geometryOffset;
+      const faceGroup = new THREE.Group();
+      faceGroup.rotation.y = faceAngle;
+      this.faceRoot.add(faceGroup);
+
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x133746,
+        emissive: 0x04151d,
+        emissiveIntensity: 0.25,
+        metalness: 0.34,
+        roughness: 0.58,
+        transparent: true,
+        side: THREE.DoubleSide
+      });
+
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(faceWidth, faceHeight), material);
+      panel.position.set(0, 0, faceRadius + 0.002);
+      panel.renderOrder = 12;
+      faceGroup.add(panel);
+
+      this.faceMeshes.push({ group: faceGroup, mesh: panel, material });
+    }
+
+    this.state = {
+      ready: false,
+      grabbedBy: null,
+      lastGrabAngle: null,
+      rawAngle: 0,
+      currentAngle: 0,
+      targetAngle: 0,
+      damping: 12,
+      innerRadius: 0.05,
+      outerRadius: 0.17,
+      heightAllowance: 0.12,
+      selectedIndex: 0
+    };
+    this.workVector = new THREE.Vector3();
+
+    this.refreshFaceTextures(false);
+    this.updateHighlight(false);
+  }
+
+  getFaceTexture(label, selected) {
+    const key = `${label}|${selected ? 'active' : 'idle'}`;
+    if (this.faceTextureCache.has(key)) {
+      return this.faceTextureCache.get(key);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+    if (selected) {
+      gradient.addColorStop(0, '#1f6d89');
+      gradient.addColorStop(1, '#0f3c51');
+    } else {
+      gradient.addColorStop(0, '#113043');
+      gradient.addColorStop(1, '#0b212f');
+    }
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    context.strokeStyle = selected ? 'rgba(255, 255, 255, 0.65)' : 'rgba(255, 255, 255, 0.18)';
+    context.lineWidth = selected ? 18 : 10;
+    context.strokeRect(32, 32, canvas.width - 64, canvas.height - 64);
+
+    context.font = `${selected ? '600' : '500'} 180px "Trebuchet MS", "Segoe UI", sans-serif`;
+    context.fillStyle = selected ? '#f7fffb' : '#d7e9fb';
+    context.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    context.lineWidth = selected ? 16 : 12;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.strokeText(label, canvas.width / 2, canvas.height / 2);
+    context.fillText(label, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = 4;
+    this.faceTextureCache.set(key, texture);
+    return texture;
+  }
+
+  refreshFaceTextures(grabbing) {
+    const ready = this.state.ready;
+    this.faceMeshes.forEach((entry, index) => {
+      const selected = index === this.state.selectedIndex;
+      const texture = this.getFaceTexture(this.labels[index], selected);
+      if (entry.material.map !== texture) {
+        entry.material.map = texture;
+        entry.material.needsUpdate = true;
+      }
+      entry.material.color.set(selected ? 0x1c5f79 : 0x133746);
+      entry.material.emissiveIntensity = selected
+        ? grabbing
+          ? 1.35
+          : ready
+            ? 1.0
+            : 0.72
+        : ready
+          ? 0.42
+          : 0.22;
+      entry.material.opacity = selected ? 1 : 0.88;
+    });
+  }
+
+  updateHighlight(grabbing) {
+    if (grabbing) {
+      this.barrelMaterial.emissiveIntensity = 1.05;
+      this.axleMaterial.emissiveIntensity = 0.85;
+    } else if (this.state.ready) {
+      this.barrelMaterial.emissiveIntensity = 0.75;
+      this.axleMaterial.emissiveIntensity = 0.68;
+    } else {
+      this.barrelMaterial.emissiveIntensity = 0.4;
+      this.axleMaterial.emissiveIntensity = 0.55;
+    }
+    this.refreshFaceTextures(grabbing);
+  }
+
+  setReady(ready) {
+    if (this.state.ready === ready) return;
+    this.state.ready = ready;
+    if (!ready) {
+      this.state.grabbedBy = null;
+      this.state.lastGrabAngle = null;
+    }
+    this.updateHighlight(false);
+  }
+
+  update(leftState, rightState, delta) {
+    const participants = [
+      { label: 'L', data: leftState },
+      { label: 'R', data: rightState }
+    ];
+
+    if (!this.state.ready) {
+      this.state.grabbedBy = null;
+      this.state.lastGrabAngle = null;
+    }
+
+    if (this.state.grabbedBy) {
+      const active = participants.find((entry) => entry.label === this.state.grabbedBy);
+      const pinch = active?.data?.pinch ?? null;
+      const pinchActive = Boolean(active?.data?.visible && pinch?.active && pinch?.position);
+      if (!pinchActive) {
+        this.state.grabbedBy = null;
+        this.state.lastGrabAngle = null;
+      }
+    }
+
+    if (!this.state.grabbedBy && this.state.ready) {
+      for (const entry of participants) {
+        const pinch = entry.data?.pinch ?? null;
+        if (!entry.data?.visible || !pinch?.active || !pinch.position) continue;
+        this.workVector.copy(pinch.position);
+        this.group.worldToLocal(this.workVector);
+        const radius = Math.hypot(this.workVector.x, this.workVector.z);
+        if (radius < this.state.innerRadius || radius > this.state.outerRadius) continue;
+        if (Math.abs(this.workVector.y) > this.state.heightAllowance) continue;
+        const angle = Math.atan2(this.workVector.x, this.workVector.z);
+        this.state.grabbedBy = entry.label;
+        this.state.lastGrabAngle = angle;
+        break;
+      }
+    }
+
+    if (this.state.grabbedBy) {
+      const active = participants.find((entry) => entry.label === this.state.grabbedBy);
+      const pinch = active?.data?.pinch ?? null;
+      if (pinch?.position) {
+        this.workVector.copy(pinch.position);
+        this.group.worldToLocal(this.workVector);
+        const angle = Math.atan2(this.workVector.x, this.workVector.z);
+        if (this.state.lastGrabAngle === null) {
+          this.state.lastGrabAngle = angle;
+        }
+        let deltaAngle = angle - this.state.lastGrabAngle;
+        deltaAngle = Math.atan2(Math.sin(deltaAngle), Math.cos(deltaAngle));
+        this.state.rawAngle += deltaAngle;
+        this.state.lastGrabAngle = angle;
+        this.state.targetAngle = this.state.rawAngle;
+      }
+    } else {
+      this.state.lastGrabAngle = null;
+    }
+
+    const segment = this.segmentAngle;
+    const rawIndex = Math.round(this.state.rawAngle / segment);
+    const normalizedIndex = ((rawIndex % this.labels.length) + this.labels.length) % this.labels.length;
+    if (normalizedIndex !== this.state.selectedIndex) {
+      this.state.selectedIndex = normalizedIndex;
+      if (typeof this.onSelectionChange === 'function') {
+        this.onSelectionChange(this.labels[this.state.selectedIndex], this.state.selectedIndex);
+      }
+    }
+
+    if (!this.state.grabbedBy) {
+      const snappedAngle = rawIndex * segment;
+      this.state.rawAngle = snappedAngle;
+      this.state.targetAngle = snappedAngle;
+    }
+
+    const target = this.state.targetAngle ?? 0;
+    this.state.currentAngle = THREE.MathUtils.damp(
+      this.state.currentAngle,
+      target,
+      this.state.damping,
+      delta
+    );
+    if (Math.abs(this.state.currentAngle - target) < 1e-4) {
+      this.state.currentAngle = target;
+    }
+
+    this.pivot.rotation.y = -this.state.currentAngle;
+
+    const grabbing = Boolean(this.state.grabbedBy);
+    this.updateHighlight(grabbing);
+
+    return {
+      grabbing,
+      activeHand: this.state.grabbedBy,
+      selectedIndex: this.state.selectedIndex,
+      selectedLabel: this.labels[this.state.selectedIndex]
+    };
   }
 }
 
@@ -826,7 +1584,7 @@ const logRigController = new DoubleGrabController(logRig, {
 });
 
 const controlRig = new THREE.Group();
-controlRig.position.set(-0.9, 1.25, -1.05);
+controlRig.position.set(-0.78, 1.25, -1.05);
 controlRig.rotation.y = Math.PI / 8;
 scene.add(controlRig);
 
@@ -840,12 +1598,12 @@ const controlPanelMaterial = new THREE.MeshStandardMaterial({
   opacity: 0.9,
   side: THREE.DoubleSide
 });
-const controlPanel = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 0.42), controlPanelMaterial);
+const controlPanel = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.44), controlPanelMaterial);
 controlPanel.position.set(0, 0, 0);
 controlRig.add(controlPanel);
 
 const controlPanelFrame = new THREE.Mesh(
-  new THREE.PlaneGeometry(0.72, 0.46),
+  new THREE.PlaneGeometry(1.16, 0.48),
   new THREE.MeshBasicMaterial({ color: 0x031018, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
 );
 controlPanelFrame.position.set(0, 0, -0.01);
@@ -854,142 +1612,56 @@ controlRig.add(controlPanelFrame);
 const controlPanelOverlay = new ControlPanelOverlay();
 controlRig.add(controlPanelOverlay.mesh);
 
-const controlButtonMaterial = new THREE.MeshStandardMaterial({
-  color: 0x3ab0ff,
-  emissive: 0x001c38,
-  emissiveIntensity: 0.45,
-  metalness: 0.45,
-  roughness: 0.4
-});
-const controlButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.1), controlButtonMaterial);
-controlButton.position.set(-0.18, -0.03, 0.06);
-controlRig.add(controlButton);
-controlButton.geometry.computeBoundingBox();
-const controlButtonHalfExtents = new THREE.Vector3();
-controlButton.geometry.boundingBox
-  .getSize(controlButtonHalfExtents)
-  .multiplyScalar(0.5);
-
-const controlButtonState = {
-  baseColor: new THREE.Color(0x3ab0ff),
-  activeColor: new THREE.Color(0xff7f9e),
-  restZ: controlButton.position.z,
+const singlePressButton = new PanelButton({
+  position: new THREE.Vector3(-0.45, -0.03, 0.06),
+  baseColor: 0x3ab0ff,
+  activeColor: 0xff7f9e,
+  emissiveColor: 0x001c38,
+  emissiveConfig: { idle: 0.45, ready: 0.95, activeScale: 1.05 },
   maxPressDepth: 0.045,
-  currentDepth: 0,
-  targetDepth: 0,
-  damping: 18,
   activationThreshold: 0.95,
-  releaseThreshold: 0.2,
-  latched: false,
-  ready: false,
-  contactPadding: 0.012,
-  depthBias: 0.003,
-  halfExtents: controlButtonHalfExtents
-};
-
-const toggleButtonMaterial = new THREE.MeshStandardMaterial({
-  color: 0xff5fa2,
-  emissive: 0x3a001f,
-  emissiveIntensity: 0.4,
-  metalness: 0.45,
-  roughness: 0.38
+  releaseThreshold: 0.2
 });
-const toggleButton = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.1), toggleButtonMaterial);
-toggleButton.position.set(0.18, -0.03, 0.06);
-controlRig.add(toggleButton);
-toggleButton.geometry.computeBoundingBox();
-const toggleButtonHalfExtents = new THREE.Vector3();
-toggleButton.geometry.boundingBox
-  .getSize(toggleButtonHalfExtents)
-  .multiplyScalar(0.5);
+controlRig.add(singlePressButton.mesh);
 
-const toggleButtonState = {
-  offColor: new THREE.Color(0xff5fa2),
-  offActiveColor: new THREE.Color(0xff8cc4),
-  onColor: new THREE.Color(0x4dffc3),
-  onActiveColor: new THREE.Color(0x8dffe0),
-  restZ: toggleButton.position.z,
-  maxPressDepth: 0.045,
-  currentDepth: 0,
-  targetDepth: 0,
-  damping: 18,
+const toggleButton = new PanelToggleButton({
+  position: new THREE.Vector3(-0.15, -0.03, 0.06),
+  offColor: 0xff5fa2,
+  offActiveColor: 0xff8cc4,
+  onColor: 0x4dffc3,
+  onActiveColor: 0x8dffe0,
+  emissiveColor: 0x3a001f,
   activationThreshold: 0.95,
   releaseThreshold: 0.35,
-  latched: false,
-  ready: false,
-  toggled: false,
-  contactPadding: 0.012,
-  depthBias: 0.003,
-  halfExtents: toggleButtonHalfExtents
-};
-
-const throttleLeverGroup = new THREE.Group();
-throttleLeverGroup.position.set(0, 0.14, 0.065);
-controlRig.add(throttleLeverGroup);
-
-const throttleTrackMaterial = new THREE.MeshStandardMaterial({
-  color: 0x10465a,
-  emissive: 0x022130,
-  emissiveIntensity: 0.45,
-  metalness: 0.5,
-  roughness: 0.38,
-  transparent: true,
-  opacity: 0.92
+  onToggle: (toggled) => {
+    const label = toggled ? 'ON' : 'OFF';
+    controlPanelOverlay.update({ toggleStatus: label });
+    systemMessages.unshift(`Toggle button: ${label}`);
+    systemMessages.splice(12);
+  }
 });
-const throttleTrack = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.34, 0.045), throttleTrackMaterial);
-throttleLeverGroup.add(throttleTrack);
+controlRig.add(toggleButton.mesh);
 
-const throttleBackplate = new THREE.Mesh(
-  new THREE.BoxGeometry(0.22, 0.04, 0.18),
-  new THREE.MeshStandardMaterial({
-    color: 0x082735,
-    emissive: 0x04121b,
-    emissiveIntensity: 0.25,
-    metalness: 0.35,
-    roughness: 0.6,
-    transparent: true,
-    opacity: 0.9
-  })
-);
-throttleBackplate.position.set(0, -0.18, -0.02);
-throttleBackplate.rotation.x = -Math.PI / 2;
-throttleLeverGroup.add(throttleBackplate);
-
-const throttleHandleMaterial = new THREE.MeshStandardMaterial({
-  color: 0x4dffc3,
-  emissive: 0x0b382d,
-  emissiveIntensity: 0.95,
-  metalness: 0.52,
-  roughness: 0.28
+const throttleLever = new ThrottleLeverControl({
+  position: new THREE.Vector3(0.18, 0.12, 0.065),
+  initialValue: 0.4
 });
-const throttleHandle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), throttleHandleMaterial);
-throttleHandle.position.set(0, 0, 0.065);
-throttleLeverGroup.add(throttleHandle);
+controlRig.add(throttleLever.group);
 
-const throttleLeverState = {
-  group: throttleLeverGroup,
-  handle: throttleHandle,
-  trackMaterial: throttleTrackMaterial,
-  handleMaterial: throttleHandleMaterial,
-  minPosition: -0.15,
-  maxPosition: 0.15,
-  currentValue: 0.4,
-  targetValue: 0.4,
-  damping: 16,
-  ready: false,
-  grabbedBy: null,
-  grabOffset: 0,
-  grabPadding: 0.03,
-  bounding: new THREE.Box3(),
-  paddedBounding: new THREE.Box3()
-};
+const rotarySelector = new RotarySelectorControl({
+  position: new THREE.Vector3(0.5, 0.02, 0.06),
+  labels: ['Apple', 'Banana', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig'],
+  onSelectionChange: (label) => {
+    controlPanelOverlay.update({ rotaryValue: label });
+    systemMessages.unshift(`Selector set to: ${label}`);
+    systemMessages.splice(12);
+  }
+});
+controlRig.add(rotarySelector.group);
 
-const initialThrottleY = THREE.MathUtils.lerp(
-  throttleLeverState.minPosition,
-  throttleLeverState.maxPosition,
-  throttleLeverState.currentValue
-);
-throttleHandle.position.y = initialThrottleY;
+controlPanelOverlay.update({
+  rotaryValue: rotarySelector.labels[rotarySelector.state.selectedIndex]
+});
 
 const controlRigController = new DoubleGrabController(controlRig, {
   proximity: 0.055,
@@ -998,21 +1670,13 @@ const controlRigController = new DoubleGrabController(controlRig, {
   maxScale: 2.5,
   onReadyChange: (ready) => {
     controlPanelMaterial.emissiveIntensity = ready ? 0.9 : 0.35;
-    controlButtonState.ready = ready;
-    toggleButtonState.ready = ready;
-    throttleLeverState.ready = ready;
+    singlePressButton.setReady(ready);
+    toggleButton.setReady(ready);
+    throttleLever.setReady(ready);
+    rotarySelector.setReady(ready);
     controlPanelOverlay.update({ highlighted: ready });
-    throttleLeverState.handleMaterial.emissiveIntensity = ready ? 1.15 : 0.65;
-    throttleLeverState.trackMaterial.emissiveIntensity = ready ? 0.75 : 0.4;
-    if (!ready) {
-      throttleLeverState.grabbedBy = null;
-      throttleLeverState.grabOffset = 0;
-    }
   }
 });
-
-const buttonWorkVector = new THREE.Vector3();
-const throttleGroupWorkVector = new THREE.Vector3();
 
 function computeButtonTargetDepth(button, state, handStates) {
   const halfExtents = state.halfExtents;
@@ -1055,122 +1719,6 @@ function computeButtonTargetDepth(button, state, handStates) {
 
   return THREE.MathUtils.clamp(maxDepth, 0, state.maxPressDepth);
 }
-
-function updatePanelButton(button, state, leftState, rightState, delta) {
-  button.updateWorldMatrix(true, false);
-  const targetDepth = computeButtonTargetDepth(button, state, [leftState, rightState]);
-  state.targetDepth = targetDepth;
-  const damping = state.damping ?? 18;
-  state.currentDepth = THREE.MathUtils.damp(state.currentDepth, targetDepth, damping, delta);
-  if (Math.abs(state.currentDepth - targetDepth) < 1e-4) {
-    state.currentDepth = targetDepth;
-  }
-  state.currentDepth = THREE.MathUtils.clamp(state.currentDepth, 0, state.maxPressDepth);
-  button.position.z = state.restZ - state.currentDepth;
-  return state.maxPressDepth > 0
-    ? THREE.MathUtils.clamp(state.currentDepth / state.maxPressDepth, 0, 1)
-    : 0;
-}
-
-function getThrottleValueFromLocalY(state, localY) {
-  const range = state.maxPosition - state.minPosition;
-  if (range <= 0) {
-    return 0;
-  }
-  const normalized = (localY - state.minPosition) / range;
-  return THREE.MathUtils.clamp(normalized, 0, 1);
-}
-
-function updateThrottleLever(state, leftState, rightState, delta) {
-  if (!state?.group || !state?.handle) {
-    return null;
-  }
-
-  const participants = [
-    { label: 'L', data: leftState },
-    { label: 'R', data: rightState }
-  ];
-
-  state.group.updateWorldMatrix(true, false);
-  state.handle.updateWorldMatrix(true, false);
-  state.bounding.setFromObject(state.handle);
-  state.paddedBounding.copy(state.bounding).expandByScalar(state.grabPadding ?? 0.03);
-
-  if (!state.ready) {
-    state.grabbedBy = null;
-    state.grabOffset = 0;
-  }
-
-  if (state.grabbedBy) {
-    const active = participants.find((entry) => entry.label === state.grabbedBy);
-    const pinchActive = Boolean(
-      active?.data?.visible &&
-        active.data.pinch?.active &&
-        active.data.pinch.position
-    );
-    if (!pinchActive) {
-      state.grabbedBy = null;
-      state.grabOffset = 0;
-    }
-  }
-
-  if (!state.grabbedBy && state.ready) {
-    for (const entry of participants) {
-      const pinch = entry.data?.pinch ?? null;
-      if (!entry.data?.visible || !pinch?.active || !pinch.position) continue;
-      if (!state.paddedBounding.containsPoint(pinch.position)) continue;
-      throttleGroupWorkVector.copy(pinch.position);
-      state.group.worldToLocal(throttleGroupWorkVector);
-      const pinchValue = getThrottleValueFromLocalY(state, throttleGroupWorkVector.y);
-      state.grabbedBy = entry.label;
-      state.grabOffset = pinchValue - state.currentValue;
-      break;
-    }
-  }
-
-  if (state.grabbedBy) {
-    const active = participants.find((entry) => entry.label === state.grabbedBy);
-    const pinch = active?.data?.pinch ?? null;
-    if (pinch?.position) {
-      throttleGroupWorkVector.copy(pinch.position);
-      state.group.worldToLocal(throttleGroupWorkVector);
-      const pinchValue = getThrottleValueFromLocalY(state, throttleGroupWorkVector.y);
-      state.targetValue = THREE.MathUtils.clamp(pinchValue - state.grabOffset, 0, 1);
-    }
-  } else {
-    state.targetValue = THREE.MathUtils.clamp(state.targetValue, 0, 1);
-  }
-
-  const damping = state.damping ?? 16;
-  state.currentValue = THREE.MathUtils.damp(state.currentValue, state.targetValue, damping, delta);
-  if (Math.abs(state.currentValue - state.targetValue) < 1e-4) {
-    state.currentValue = state.targetValue;
-  }
-
-  const handleY = THREE.MathUtils.lerp(state.minPosition, state.maxPosition, state.currentValue);
-  state.handle.position.y = handleY;
-  state.handle.rotation.x = THREE.MathUtils.degToRad(
-    THREE.MathUtils.lerp(-18, 10, state.currentValue)
-  );
-  state.handle.updateMatrix();
-  state.handle.updateMatrixWorld(true);
-  state.bounding.setFromObject(state.handle);
-  state.paddedBounding.copy(state.bounding).expandByScalar(state.grabPadding ?? 0.03);
-
-  const trackIntensity = state.ready ? 0.45 + state.currentValue * 0.4 : 0.35;
-  const handleIntensity = state.ready
-    ? 1 + state.currentValue * 0.5 + (state.grabbedBy ? 0.4 : 0)
-    : 0.6;
-  if (state.trackMaterial) {
-    state.trackMaterial.emissiveIntensity = trackIntensity;
-  }
-  if (state.handleMaterial) {
-    state.handleMaterial.emissiveIntensity = handleIntensity;
-  }
-
-  return state.grabbedBy;
-}
-
 const clock = new THREE.Clock();
 
 renderer.setAnimationLoop(() => {
@@ -1187,75 +1735,26 @@ renderer.setAnimationLoop(() => {
   const logRigStatus = logRigController.update(leftState, rightState);
   const controlRigStatus = controlRigController.update(leftState, rightState);
 
-  const controlPressRatio = updatePanelButton(
-    controlButton,
-    controlButtonState,
-    leftState,
-    rightState,
-    delta
-  );
-  const togglePressRatio = updatePanelButton(
-    toggleButton,
-    toggleButtonState,
-    leftState,
-    rightState,
-    delta
-  );
-  const throttleActiveHand = updateThrottleLever(
-    throttleLeverState,
-    leftState,
-    rightState,
-    delta
-  );
+  const singlePressResult = singlePressButton.update(leftState, rightState, delta);
+  const toggleResult = toggleButton.update(leftState, rightState, delta);
+  const throttleResult = throttleLever.update(leftState, rightState, delta);
+  const rotaryResult = rotarySelector.update(leftState, rightState, delta);
 
-  const throttlePercent = Math.round(throttleLeverState.currentValue * 100);
-  const sliderValueText = throttleActiveHand
-    ? `${throttlePercent}% · ${throttleActiveHand === 'L' ? 'Left' : 'Right'} hand`
+  const throttlePercent = Math.round(throttleResult.value * 100);
+  const sliderValueText = throttleResult.activeHand
+    ? `${throttlePercent}% · ${throttleResult.activeHand === 'L' ? 'Left' : 'Right'} hand`
     : `${throttlePercent}%`;
-  controlPanelOverlay.update({ sliderValue: sliderValueText });
+  const rotaryLabel = rotaryResult.selectedLabel ?? rotarySelector.labels[rotarySelector.state.selectedIndex];
+  controlPanelOverlay.update({
+    sliderValue: sliderValueText,
+    toggleStatus: toggleResult.toggled ? 'ON' : 'OFF',
+    rotaryValue: rotaryLabel
+  });
 
-  if (controlPressRatio >= controlButtonState.activationThreshold) {
-    if (!controlButtonState.latched) {
-      controlButtonState.latched = true;
-      systemMessages.unshift('Single press activated');
-      systemMessages.splice(12);
-    }
-  } else if (controlButtonState.latched && controlPressRatio <= controlButtonState.releaseThreshold) {
-    controlButtonState.latched = false;
+  if (singlePressResult.justActivated) {
+    systemMessages.unshift('Single press activated');
+    systemMessages.splice(12);
   }
-
-  if (togglePressRatio >= toggleButtonState.activationThreshold) {
-    if (!toggleButtonState.latched) {
-      toggleButtonState.latched = true;
-      toggleButtonState.toggled = !toggleButtonState.toggled;
-      const toggleLabel = toggleButtonState.toggled ? 'ON' : 'OFF';
-      systemMessages.unshift(`Toggle button: ${toggleLabel}`);
-      systemMessages.splice(12);
-      controlPanelOverlay.update({ toggleStatus: toggleLabel });
-    }
-  } else if (toggleButtonState.latched && togglePressRatio <= toggleButtonState.releaseThreshold) {
-    toggleButtonState.latched = false;
-  }
-
-  controlButtonMaterial.color
-    .copy(controlButtonState.baseColor)
-    .lerp(controlButtonState.activeColor, controlPressRatio);
-  const controlEmissiveBase = controlButtonState.ready ? 0.95 : 0.45;
-  controlButtonMaterial.emissiveIntensity = controlEmissiveBase + controlPressRatio * 1.05;
-
-  const toggleBaseColor = toggleButtonState.toggled
-    ? toggleButtonState.onColor
-    : toggleButtonState.offColor;
-  const toggleActiveColor = toggleButtonState.toggled
-    ? toggleButtonState.onActiveColor
-    : toggleButtonState.offActiveColor;
-  toggleButtonMaterial.color.copy(toggleBaseColor).lerp(toggleActiveColor, togglePressRatio);
-  const toggleEmissiveBase = toggleButtonState.ready
-    ? toggleButtonState.toggled
-      ? 1
-      : 0.6
-    : 0.4;
-  toggleButtonMaterial.emissiveIntensity = toggleEmissiveBase + togglePressRatio * 0.9;
 
   leftLogPanel.setLines(leftTracker.getLogLines());
   rightLogPanel.setLines(rightTracker.getLogLines());
@@ -1273,9 +1772,10 @@ renderer.setAnimationLoop(() => {
   }
 
   generalLines.push(
-    `Single press ready: ${controlButtonState.ready ? 'YES' : 'no'}`,
-    `Toggle button: ${toggleButtonState.toggled ? 'ON' : 'OFF'}`,
-    `Throttle lever: ${throttlePercent}% (${throttleLeverState.currentValue.toFixed(2)})`
+    `Single press ready: ${singlePressButton.state.ready ? 'YES' : 'no'}`,
+    `Toggle button: ${toggleResult.toggled ? 'ON' : 'OFF'}`,
+    `Throttle lever: ${throttlePercent}% (${throttleResult.value.toFixed(2)})`,
+    `Gear selector: ${rotaryLabel}`
   );
 
   const statusLines = [];
@@ -1285,9 +1785,12 @@ renderer.setAnimationLoop(() => {
   if (controlRigStatus.grabbing) {
     statusLines.push('Moving control panel…');
   }
-  if (throttleActiveHand) {
-    const throttleHandLabel = throttleActiveHand === 'L' ? 'left' : 'right';
+  if (throttleResult.activeHand) {
+    const throttleHandLabel = throttleResult.activeHand === 'L' ? 'left' : 'right';
     statusLines.push(`Adjusting throttle lever (${throttleHandLabel} hand)…`);
+  }
+  if (rotaryResult.grabbing) {
+    statusLines.push('Rotating gear selector…');
   }
   if (statusLines.length > 0) {
     generalLines.push('—', ...statusLines);
