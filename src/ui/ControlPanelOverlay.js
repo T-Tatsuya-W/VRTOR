@@ -10,12 +10,15 @@ export class ControlPanelOverlay {
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.magFilter = THREE.LinearFilter;
-    this.material = new THREE.MeshBasicMaterial({ map: this.texture });
-    this.material.depthTest = false;
+    this.material = new THREE.MeshBasicMaterial({
+      map: this.texture,
+      transparent: true
+    });
+    this.material.depthTest = true;
     this.material.depthWrite = false;
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.material);
     this.mesh.position.set(0, 0, 0.002);
-    this.mesh.renderOrder = 20;
+    this.mesh.renderOrder = 5;
     this.state = {
       header: 'Controls',
       highlighted: false,

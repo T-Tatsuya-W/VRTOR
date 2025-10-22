@@ -11,7 +11,9 @@ export class PanelButton {
     emissiveColor = 0x001c38,
     emissiveConfig = { idle: 0.45, ready: 0.95, activeScale: 1.05 },
     maxPressDepth = 0.045,
-    damping = 18,
+    damping,
+    pressDamping,
+    releaseDamping,
     activationThreshold = 0.95,
     releaseThreshold = 0.2,
     contactPadding = 0.012,
@@ -31,6 +33,17 @@ export class PanelButton {
       activeScale: emissiveConfig?.activeScale ?? 1.05
     };
 
+    const resolvedPressDamping = typeof pressDamping === 'number'
+      ? Math.max(pressDamping, 0)
+      : typeof damping === 'number'
+        ? Math.max(damping, 0)
+        : 60;
+    const resolvedReleaseDamping = typeof releaseDamping === 'number'
+      ? Math.max(releaseDamping, 0)
+      : typeof damping === 'number'
+        ? Math.max(damping, 0)
+        : 20;
+
     const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
     geometry.computeVertexNormals();
     this.material = new THREE.MeshStandardMaterial({
@@ -41,7 +54,10 @@ export class PanelButton {
       roughness,
       flatShading,
       transparent: false,
-      opacity: 1
+      opacity: 1,
+      depthTest: true,
+      depthWrite: true,
+      blending: THREE.NormalBlending
     });
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.castShadow = true;
@@ -63,7 +79,8 @@ export class PanelButton {
       maxPressDepth,
       currentDepth: 0,
       targetDepth: 0,
-      damping,
+      pressDamping: resolvedPressDamping,
+      releaseDamping: resolvedReleaseDamping,
       activationThreshold,
       releaseThreshold,
       latched: false,
@@ -114,10 +131,20 @@ export class PanelButton {
     this.mesh.updateWorldMatrix(true, false);
     const targetDepth = computeButtonTargetDepth(this.mesh, this.state, [leftState, rightState]);
     this.state.targetDepth = targetDepth;
-    const damping = this.state.damping ?? 18;
-    this.state.currentDepth = THREE.MathUtils.damp(this.state.currentDepth, targetDepth, damping, delta);
-    if (Math.abs(this.state.currentDepth - targetDepth) < 1e-4) {
+    const goingDeeper = targetDepth > this.state.currentDepth;
+    const damping = Math.max(goingDeeper ? this.state.pressDamping : this.state.releaseDamping, 0);
+    if (damping === 0) {
       this.state.currentDepth = targetDepth;
+    } else {
+      this.state.currentDepth = THREE.MathUtils.damp(
+        this.state.currentDepth,
+        targetDepth,
+        damping,
+        delta
+      );
+      if (Math.abs(this.state.currentDepth - targetDepth) < 1e-4) {
+        this.state.currentDepth = targetDepth;
+      }
     }
     this.state.currentDepth = THREE.MathUtils.clamp(this.state.currentDepth, 0, this.state.maxPressDepth);
     this.mesh.position.z = this.state.restZ - this.state.currentDepth;
