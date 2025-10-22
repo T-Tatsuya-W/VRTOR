@@ -3,6 +3,87 @@ import { OrbitControls } from 'https://unpkg.com/three@0.161.0/examples/jsm/cont
 import { XRButton } from 'https://unpkg.com/three@0.161.0/examples/jsm/webxr/XRButton.js';
 import { XRHandModelFactory } from 'https://unpkg.com/three@0.161.0/examples/jsm/webxr/XRHandModelFactory.js';
 
+function formatVec3(v) {
+  return `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`;
+}
+
+function createLabelSprite(message, options = {}) {
+  const {
+    width = 0.8,
+    fontSize = 120,
+    color = '#ffffff',
+    strokeStyle = 'rgba(0, 0, 0, 0.35)',
+    lineWidth = 10,
+    renderOrder = 10,
+    depthTest = true
+  } = options;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const context = canvas.getContext('2d');
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.font = `${fontSize}px "Trebuchet MS", "Segoe UI", sans-serif`;
+  context.fillStyle = color;
+  context.strokeStyle = strokeStyle;
+  context.lineWidth = lineWidth;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.strokeText(message, canvas.width / 2, canvas.height / 2);
+  context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest,
+    depthWrite: false
+  });
+
+  const sprite = new THREE.Sprite(material);
+  const aspect = canvas.height / canvas.width;
+  sprite.scale.set(width, width * aspect, 1);
+  sprite.renderOrder = renderOrder;
+  sprite.userData.texture = texture;
+  return sprite;
+}
+
+function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
+  if (!text) {
+    return y;
+  }
+
+  const words = `${text}`.split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return y;
+  }
+
+  let line = '';
+  let cursorY = y;
+
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (ctx.measureText(candidate).width > maxWidth && line) {
+      ctx.fillText(line, x, cursorY);
+      line = word;
+      cursorY += lineHeight;
+    } else {
+      line = candidate;
+    }
+  }
+
+  if (line) {
+    ctx.fillText(line, x, cursorY);
+    cursorY += lineHeight;
+  }
+
+  return cursorY;
+}
+
 class HandTracker {
   constructor(hand, label) {
     this.hand = hand;
@@ -226,87 +307,6 @@ class HandTracker {
   }
 }
 
-function formatVec3(v) {
-  return `${v.x.toFixed(2)}, ${v.y.toFixed(2)}, ${v.z.toFixed(2)}`;
-}
-
-function createLabelSprite(message, options = {}) {
-  const {
-    width = 0.8,
-    fontSize = 120,
-    color = '#ffffff',
-    strokeStyle = 'rgba(0, 0, 0, 0.35)',
-    lineWidth = 10,
-    renderOrder = 10,
-    depthTest = true
-  } = options;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.font = `${fontSize}px "Trebuchet MS", "Segoe UI", sans-serif`;
-  context.fillStyle = color;
-  context.strokeStyle = strokeStyle;
-  context.lineWidth = lineWidth;
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.strokeText(message, canvas.width / 2, canvas.height / 2);
-  context.fillText(message, canvas.width / 2, canvas.height / 2);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    depthTest,
-    depthWrite: false
-  });
-
-  const sprite = new THREE.Sprite(material);
-  const aspect = canvas.height / canvas.width;
-  sprite.scale.set(width, width * aspect, 1);
-  sprite.renderOrder = renderOrder;
-  sprite.userData.texture = texture;
-  return sprite;
-}
-
-function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
-  if (!text) {
-    return y;
-  }
-
-  const words = `${text}`.split(/\s+/).filter(Boolean);
-  if (words.length === 0) {
-    return y;
-  }
-
-  let line = '';
-  let cursorY = y;
-
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (ctx.measureText(candidate).width > maxWidth && line) {
-      ctx.fillText(line, x, cursorY);
-      line = word;
-      cursorY += lineHeight;
-    } else {
-      line = candidate;
-    }
-  }
-
-  if (line) {
-    ctx.fillText(line, x, cursorY);
-    cursorY += lineHeight;
-  }
-
-  return cursorY;
-}
-
 class LogPanel {
   constructor(title, { width = 1.05, height = 0.55 } = {}) {
     this.title = title;
@@ -392,25 +392,38 @@ class ControlPanelOverlay {
     this.mesh.renderOrder = 20;
     this.state = {
       header: 'Controls',
-      singleLabel: 'Single Press',
-      singleHint: 'Tap to log an event',
-      toggleLabel: 'Toggle Button',
-      toggleStatus: 'OFF',
-      toggleHint: 'Alternate colour each tap',
-      sliderLabel: 'Throttle Lever',
-      sliderValue: '40%',
-      sliderHint: 'Grab the handle and move to choose a value',
-      rotaryLabel: 'Gear Selector',
-      rotaryValue: 'Apple',
-      rotaryHint: 'Rotate the cog to browse the list',
-      highlighted: false
+      highlighted: false,
+      columns: []
     };
     this.render();
   }
 
   update(nextState = {}) {
-    const merged = { ...this.state, ...nextState };
-    const changed = Object.keys(merged).some((key) => merged[key] !== this.state[key]);
+    const columns = Array.isArray(nextState.columns)
+      ? nextState.columns.map((column) => ({ ...column }))
+      : this.state.columns;
+    const merged = {
+      ...this.state,
+      ...nextState,
+      columns
+    };
+
+    const changed =
+      merged.highlighted !== this.state.highlighted ||
+      merged.header !== this.state.header ||
+      merged.columns.length !== this.state.columns.length ||
+      merged.columns.some((column, index) => {
+        const prev = this.state.columns[index];
+        if (!prev) return true;
+        return (
+          column.title !== prev.title ||
+          column.value !== prev.value ||
+          column.valueLabel !== prev.valueLabel ||
+          column.hint !== prev.hint ||
+          column.accent !== prev.accent
+        );
+      });
+
     if (!changed) return;
     this.state = merged;
     this.render();
@@ -434,50 +447,24 @@ class ControlPanelOverlay {
     ctx.textAlign = 'left';
     ctx.fillText(this.state.header, 32, 36);
 
-    const columnCount = 4;
+    const columns = this.state.columns.length
+      ? this.state.columns
+      : [{ title: 'Control', valueLabel: 'Value', value: '—', hint: '', accent: '#00ffcc' }];
+    const columnCount = columns.length;
     const columnWidth = (canvas.width - 64) / columnCount;
     const contentY = 132;
 
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.18)';
-    ctx.lineWidth = 3;
-    for (let i = 1; i < columnCount; i += 1) {
-      const x = 32 + columnWidth * i;
-      ctx.beginPath();
-      ctx.moveTo(x, 112);
-      ctx.lineTo(x, canvas.height - 36);
-      ctx.stroke();
-    }
-
-    const columns = [
-      {
-        title: this.state.singleLabel,
-        valueLabel: 'Action',
-        value: 'Tap to log an event',
-        accent: '#00d4ff',
-        hint: this.state.singleHint
-      },
-      {
-        title: this.state.toggleLabel,
-        valueLabel: 'State',
-        value: this.state.toggleStatus,
-        accent: this.state.toggleStatus === 'ON' ? '#00ffcc' : '#ff9ebd',
-        hint: this.state.toggleHint
-      },
-      {
-        title: this.state.sliderLabel,
-        valueLabel: 'Value',
-        value: this.state.sliderValue,
-        accent: '#00ffcc',
-        hint: this.state.sliderHint
-      },
-      {
-        title: this.state.rotaryLabel,
-        valueLabel: 'Selected',
-        value: this.state.rotaryValue,
-        accent: '#ffd27a',
-        hint: this.state.rotaryHint
+    if (columnCount > 1) {
+      ctx.strokeStyle = 'rgba(0, 255, 204, 0.18)';
+      ctx.lineWidth = 3;
+      for (let i = 1; i < columnCount; i += 1) {
+        const x = 32 + columnWidth * i;
+        ctx.beginPath();
+        ctx.moveTo(x, 112);
+        ctx.lineTo(x, canvas.height - 36);
+        ctx.stroke();
       }
-    ];
+    }
 
     columns.forEach((column, index) => {
       const x = 32 + columnWidth * index;
@@ -487,19 +474,18 @@ class ControlPanelOverlay {
       ctx.fillText(column.title, x, contentY);
 
       ctx.font = '600 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-      ctx.fillStyle = column.accent;
-      const line = `${column.valueLabel}: ${column.value}`;
+      ctx.fillStyle = column.accent ?? '#00ffcc';
+      const line = `${column.valueLabel ?? 'Value'}: ${column.value ?? '—'}`;
       ctx.fillText(line, x, contentY + 46);
 
       ctx.font = '500 24px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
       ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
-      drawWrappedText(ctx, column.hint, x, contentY + 86, columnWidth - 32, 30);
+      drawWrappedText(ctx, column.hint ?? '', x, contentY + 86, columnWidth - 32, 30);
     });
 
     this.texture.needsUpdate = true;
   }
 }
-
 const buttonWorkVector = new THREE.Vector3();
 
 class PanelButton {
@@ -635,6 +621,48 @@ class PanelButton {
   }
 }
 
+function computeButtonTargetDepth(button, state, handStates) {
+  const halfExtents = state.halfExtents;
+  if (!halfExtents) return 0;
+  const padding = state.contactPadding ?? 0.012;
+  const depthBias = state.depthBias ?? 0;
+  let maxDepth = 0;
+
+  for (const handState of handStates) {
+    if (!handState?.visible) continue;
+    const contactPoints = Array.isArray(handState.contactPoints) ? handState.contactPoints : [];
+    for (const point of contactPoints) {
+      buttonWorkVector.copy(point);
+      button.worldToLocal(buttonWorkVector);
+      if (
+        Math.abs(buttonWorkVector.x) <= halfExtents.x + padding &&
+        Math.abs(buttonWorkVector.y) <= halfExtents.y + padding
+      ) {
+        const depth = halfExtents.z - buttonWorkVector.z + depthBias;
+        if (depth > maxDepth) {
+          maxDepth = depth;
+        }
+      }
+    }
+    const pinchPoint = handState.pinch?.position ?? null;
+    if (pinchPoint) {
+      buttonWorkVector.copy(pinchPoint);
+      button.worldToLocal(buttonWorkVector);
+      if (
+        Math.abs(buttonWorkVector.x) <= halfExtents.x + padding &&
+        Math.abs(buttonWorkVector.y) <= halfExtents.y + padding
+      ) {
+        const depth = halfExtents.z - buttonWorkVector.z + depthBias;
+        if (depth > maxDepth) {
+          maxDepth = depth;
+        }
+      }
+    }
+  }
+
+  return THREE.MathUtils.clamp(maxDepth, 0, state.maxPressDepth);
+}
+
 class PanelToggleButton {
   constructor({
     position = new THREE.Vector3(),
@@ -760,56 +788,50 @@ class ThrottleLeverControl {
       transparent: true,
       opacity: 0.92
     });
-    const track = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.34, 0.045), this.trackMaterial);
-    this.group.add(track);
-
-    const backplate = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.04, 0.18),
-      new THREE.MeshStandardMaterial({
-        color: 0x082735,
-        emissive: 0x04121b,
-        emissiveIntensity: 0.25,
-        metalness: 0.35,
-        roughness: 0.6,
-        transparent: true,
-        opacity: 0.9
-      })
-    );
-    backplate.position.set(0, -0.18, -0.02);
-    backplate.rotation.x = -Math.PI / 2;
-    this.group.add(backplate);
 
     this.handleMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4dffc3,
-      emissive: 0x0b382d,
-      emissiveIntensity: 0.95,
-      metalness: 0.52,
-      roughness: 0.28
+      color: 0x1d8f9e,
+      emissive: 0x032a34,
+      emissiveIntensity: 0.8,
+      metalness: 0.55,
+      roughness: 0.32,
+      transparent: true,
+      opacity: 0.96
     });
-    this.handle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), this.handleMaterial);
-    this.handle.position.set(0, 0, 0.065);
+
+    const track = new THREE.Mesh(new THREE.BoxGeometry(0.12, maxPosition - minPosition + 0.2, 0.05), this.trackMaterial);
+    track.position.set(0, (minPosition + maxPosition) / 2, 0);
+    track.castShadow = true;
+    track.receiveShadow = true;
+    this.group.add(track);
+
+    this.handle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.1), this.handleMaterial);
+    this.handle.position.set(0, THREE.MathUtils.lerp(minPosition, maxPosition, initialValue), 0);
+    this.handle.castShadow = true;
+    this.handle.receiveShadow = true;
     this.group.add(this.handle);
 
+    const indicatorMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+    const indicator = new THREE.Mesh(new THREE.PlaneGeometry(0.02, 0.1), indicatorMaterial);
+    indicator.position.set(0.12, 0, 0.051);
+    this.group.add(indicator);
+
     this.state = {
+      ready: false,
+      currentValue: THREE.MathUtils.clamp(initialValue, 0, 1),
+      targetValue: THREE.MathUtils.clamp(initialValue, 0, 1),
       minPosition,
       maxPosition,
-      currentValue: initialValue,
-      targetValue: initialValue,
+      grabPadding,
       damping,
-      ready: false,
       grabbedBy: null,
       grabOffset: 0,
-      grabPadding,
       bounding: new THREE.Box3(),
       paddedBounding: new THREE.Box3()
     };
     this.onValueChange = onValueChange;
-    this.lastReportedValue = initialValue;
     this.workVector = new THREE.Vector3();
-
-    const initialY = THREE.MathUtils.lerp(minPosition, maxPosition, initialValue);
-    this.handle.position.y = initialY;
-    this.handle.rotation.x = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(-18, 10, initialValue));
+    this.lastReportedValue = this.state.currentValue;
   }
 
   setReady(ready) {
@@ -819,15 +841,17 @@ class ThrottleLeverControl {
       this.state.grabbedBy = null;
       this.state.grabOffset = 0;
     }
-    this.trackMaterial.emissiveIntensity = ready ? 0.75 : 0.4;
-    this.handleMaterial.emissiveIntensity = ready ? 1.15 : 0.65;
   }
 
-  getValueFromLocalY(localY) {
-    const range = this.state.maxPosition - this.state.minPosition;
-    if (range <= 0) return 0;
-    const normalized = (localY - this.state.minPosition) / range;
-    return THREE.MathUtils.clamp(normalized, 0, 1);
+  setValue(value) {
+    const clamped = THREE.MathUtils.clamp(value, 0, 1);
+    this.state.currentValue = clamped;
+    this.state.targetValue = clamped;
+  }
+
+  getValueFromLocalY(y) {
+    const { minPosition, maxPosition } = this.state;
+    return THREE.MathUtils.clamp((y - minPosition) / (maxPosition - minPosition), 0, 1);
   }
 
   update(leftState, rightState, delta) {
@@ -933,7 +957,6 @@ class ThrottleLeverControl {
     };
   }
 }
-
 class RotarySelectorControl {
   constructor({
     position = new THREE.Vector3(),
@@ -1080,58 +1103,39 @@ class RotarySelectorControl {
     context.lineWidth = selected ? 18 : 10;
     context.strokeRect(32, 32, canvas.width - 64, canvas.height - 64);
 
-    context.font = `${selected ? '600' : '500'} 180px "Trebuchet MS", "Segoe UI", sans-serif`;
-    context.fillStyle = selected ? '#f7fffb' : '#d7e9fb';
-    context.strokeStyle = 'rgba(0, 0, 0, 0.35)';
-    context.lineWidth = selected ? 16 : 12;
+    context.fillStyle = '#ecf9ff';
+    context.font = '700 110px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     context.textAlign = 'center';
     context.textBaseline = 'middle';
-    context.strokeText(label, canvas.width / 2, canvas.height / 2);
-    context.fillText(label, canvas.width / 2, canvas.height / 2);
+    drawWrappedText(context, label, canvas.width / 2, canvas.height / 2 - 40, 360, 110);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = 4;
+    texture.needsUpdate = true;
     this.faceTextureCache.set(key, texture);
     return texture;
   }
 
-  refreshFaceTextures(grabbing) {
-    const ready = this.state.ready;
+  refreshFaceTextures(selectedDirty = true) {
     this.faceMeshes.forEach((entry, index) => {
+      const label = this.labels[index];
       const selected = index === this.state.selectedIndex;
-      const texture = this.getFaceTexture(this.labels[index], selected);
-      if (entry.material.map !== texture) {
+      const texture = this.getFaceTexture(label, selected);
+      if (selectedDirty || entry.material.map !== texture) {
         entry.material.map = texture;
         entry.material.needsUpdate = true;
       }
-      entry.material.color.set(selected ? 0x1c5f79 : 0x133746);
-      entry.material.emissiveIntensity = selected
-        ? grabbing
-          ? 1.35
-          : ready
-            ? 1.0
-            : 0.72
-        : ready
-          ? 0.42
-          : 0.22;
-      entry.material.opacity = selected ? 1 : 0.88;
     });
   }
 
-  updateHighlight(grabbing) {
-    if (grabbing) {
-      this.barrelMaterial.emissiveIntensity = 1.05;
-      this.axleMaterial.emissiveIntensity = 0.85;
-    } else if (this.state.ready) {
-      this.barrelMaterial.emissiveIntensity = 0.75;
-      this.axleMaterial.emissiveIntensity = 0.68;
-    } else {
-      this.barrelMaterial.emissiveIntensity = 0.4;
-      this.axleMaterial.emissiveIntensity = 0.55;
-    }
-    this.refreshFaceTextures(grabbing);
+  updateHighlight(active) {
+    this.barrelMaterial.emissiveIntensity = active ? 0.9 : 0.4;
+    this.axleMaterial.emissiveIntensity = active ? 0.85 : 0.55;
+    this.faceMeshes.forEach((entry, index) => {
+      const selected = index === this.state.selectedIndex;
+      entry.material.emissiveIntensity = selected ? (active ? 0.8 : 0.45) : active ? 0.45 : 0.25;
+    });
   }
 
   setReady(ready) {
@@ -1141,7 +1145,6 @@ class RotarySelectorControl {
       this.state.grabbedBy = null;
       this.state.lastGrabAngle = null;
     }
-    this.updateHighlight(false);
   }
 
   update(leftState, rightState, delta) {
@@ -1154,6 +1157,8 @@ class RotarySelectorControl {
       this.state.grabbedBy = null;
       this.state.lastGrabAngle = null;
     }
+
+    this.group.updateWorldMatrix(true, false);
 
     if (this.state.grabbedBy) {
       const active = participants.find((entry) => entry.label === this.state.grabbedBy);
@@ -1209,6 +1214,7 @@ class RotarySelectorControl {
       if (typeof this.onSelectionChange === 'function') {
         this.onSelectionChange(this.labels[this.state.selectedIndex], this.state.selectedIndex);
       }
+      this.refreshFaceTextures(true);
     }
 
     if (!this.state.grabbedBy) {
@@ -1452,360 +1458,664 @@ class DoubleGrabController {
 }
 
 DoubleGrabController.activeController = null;
+class LogCluster {
+  constructor({ position = new THREE.Vector3(0, 1.6, -1.2), onReadyChange = null } = {}) {
+    this.group = new THREE.Group();
+    if (position instanceof THREE.Vector3) {
+      this.group.position.copy(position);
+    } else if (Array.isArray(position)) {
+      this.group.position.fromArray(position);
+    } else if (position && typeof position === 'object') {
+      this.group.position.set(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+    }
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x101218);
-
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
-camera.position.set(0, 1.6, 3);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-renderer.xr.setReferenceSpaceType('local-floor');
-document.body.appendChild(renderer.domElement);
-
-const xrButton = XRButton.createButton(renderer, {
-  requiredFeatures: ['local-floor'],
-  optionalFeatures: ['hand-tracking']
-});
-
-document.getElementById('enter').appendChild(xrButton);
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-dir.position.set(1, 2, 1);
-scene.add(dir);
-
-const grid = new THREE.GridHelper(10, 20, 0x333333, 0x222222);
-grid.position.y = 0;
-scene.add(grid);
-
-const torusMaterial = new THREE.MeshStandardMaterial({
-  color: 0x55ffee,
-  emissive: 0x08263a,
-  metalness: 0.35,
-  roughness: 0.15,
-  transparent: true,
-  opacity: 0.35,
-  side: THREE.DoubleSide,
-  depthWrite: false
-});
-
-const torus = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 64, 128), torusMaterial);
-torus.position.set(0, 1.5, 0);
-torus.rotation.x = Math.PI / 2;
-scene.add(torus);
-
-const torusLabel = createLabelSprite('VRTOR', {
-  width: 0.38,
-  fontSize: 160,
-  color: '#f1f6ff',
-  strokeStyle: 'rgba(0, 0, 0, 0.5)',
-  renderOrder: 15,
-  depthTest: false
-});
-const torusParams = torus.geometry.parameters;
-const torusLabelOffset = torusParams.radius - torusParams.tube * 0.5;
-torusLabel.position.set(0, 0, torusLabelOffset);
-torusLabel.material.depthTest = false;
-torusLabel.material.depthWrite = false;
-torus.add(torusLabel);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1.5, 0);
-controls.enableDamping = true;
-
-const handFactory = new XRHandModelFactory();
-
-const leftHand = renderer.xr.getHand(0);
-leftHand.add(handFactory.createHandModel(leftHand, 'spheres'));
-leftHand.userData.which = 'L';
-scene.add(leftHand);
-
-const rightHand = renderer.xr.getHand(1);
-rightHand.add(handFactory.createHandModel(rightHand, 'spheres'));
-rightHand.userData.which = 'R';
-scene.add(rightHand);
-
-const trackers = [
-  new HandTracker(leftHand, 'L'),
-  new HandTracker(rightHand, 'R')
-];
-
-const pinchTelemetry = {
-  L: null,
-  R: null
-};
-
-trackers.forEach((tracker) => {
-  tracker.on('pinch', ({ label, pinch }) => {
-    pinchTelemetry[label] = {
-      position: pinch.position ? pinch.position.clone() : null,
-      speed: pinch.speed
+    this.panels = {
+      left: new LogPanel('Left Hand Log'),
+      right: new LogPanel('Right Hand Log'),
+      system: new LogPanel('System Log')
     };
-  });
 
-  tracker.on('pinchend', ({ label }) => {
-    pinchTelemetry[label] = null;
-  });
-});
+    this.panels.left.mesh.position.set(-1.25, 0, 0);
+    this.panels.right.mesh.position.set(1.25, 0, 0);
+    this.panels.system.mesh.position.set(0, 0, 0);
 
-const logRig = new THREE.Group();
-logRig.position.set(0, 1.6, -1.2);
-scene.add(logRig);
+    this.group.add(this.panels.left.mesh);
+    this.group.add(this.panels.right.mesh);
+    this.group.add(this.panels.system.mesh);
 
-const leftLogPanel = new LogPanel('Left Hand Log');
-leftLogPanel.mesh.position.set(-1.25, 0, 0);
-logRig.add(leftLogPanel.mesh);
-
-const rightLogPanel = new LogPanel('Right Hand Log');
-rightLogPanel.mesh.position.set(1.25, 0, 0);
-logRig.add(rightLogPanel.mesh);
-
-const systemLogPanel = new LogPanel('System Log');
-systemLogPanel.mesh.position.set(0, 0, 0);
-logRig.add(systemLogPanel.mesh);
-
-const systemMessages = [];
-
-window.addEventListener('error', (e) => {
-  systemMessages.unshift(`Error: ${e.message}`);
-  systemMessages.splice(12);
-});
-
-const logRigController = new DoubleGrabController(logRig, {
-  proximity: 0.065,
-  intersectionPadding: 0.04,
-  onReadyChange: (ready) => {
-    [leftLogPanel, rightLogPanel, systemLogPanel].forEach((panel) => panel.setHighlighted(ready));
-  }
-});
-
-const controlRig = new THREE.Group();
-controlRig.position.set(-0.78, 1.25, -1.05);
-controlRig.rotation.y = Math.PI / 8;
-scene.add(controlRig);
-
-const controlPanelMaterial = new THREE.MeshStandardMaterial({
-  color: 0x0c1f2b,
-  emissive: 0x062b3f,
-  emissiveIntensity: 0.35,
-  metalness: 0.2,
-  roughness: 0.65,
-  transparent: true,
-  opacity: 0.9,
-  side: THREE.DoubleSide
-});
-const controlPanel = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.44), controlPanelMaterial);
-controlPanel.position.set(0, 0, 0);
-controlRig.add(controlPanel);
-
-const controlPanelFrame = new THREE.Mesh(
-  new THREE.PlaneGeometry(1.16, 0.48),
-  new THREE.MeshBasicMaterial({ color: 0x031018, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
-);
-controlPanelFrame.position.set(0, 0, -0.01);
-controlRig.add(controlPanelFrame);
-
-const controlPanelOverlay = new ControlPanelOverlay();
-controlRig.add(controlPanelOverlay.mesh);
-
-const singlePressButton = new PanelButton({
-  position: new THREE.Vector3(-0.45, -0.03, 0.06),
-  baseColor: 0x3ab0ff,
-  activeColor: 0xff7f9e,
-  emissiveColor: 0x001c38,
-  emissiveConfig: { idle: 0.45, ready: 0.95, activeScale: 1.05 },
-  maxPressDepth: 0.045,
-  activationThreshold: 0.95,
-  releaseThreshold: 0.2
-});
-controlRig.add(singlePressButton.mesh);
-
-const toggleButton = new PanelToggleButton({
-  position: new THREE.Vector3(-0.15, -0.03, 0.06),
-  offColor: 0xff5fa2,
-  offActiveColor: 0xff8cc4,
-  onColor: 0x4dffc3,
-  onActiveColor: 0x8dffe0,
-  emissiveColor: 0x3a001f,
-  activationThreshold: 0.95,
-  releaseThreshold: 0.35,
-  onToggle: (toggled) => {
-    const label = toggled ? 'ON' : 'OFF';
-    controlPanelOverlay.update({ toggleStatus: label });
-    systemMessages.unshift(`Toggle button: ${label}`);
-    systemMessages.splice(12);
-  }
-});
-controlRig.add(toggleButton.mesh);
-
-const throttleLever = new ThrottleLeverControl({
-  position: new THREE.Vector3(0.18, 0.12, 0.065),
-  initialValue: 0.4
-});
-controlRig.add(throttleLever.group);
-
-const rotarySelector = new RotarySelectorControl({
-  position: new THREE.Vector3(0.5, 0.02, 0.06),
-  labels: ['Apple', 'Banana', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig'],
-  onSelectionChange: (label) => {
-    controlPanelOverlay.update({ rotaryValue: label });
-    systemMessages.unshift(`Selector set to: ${label}`);
-    systemMessages.splice(12);
-  }
-});
-controlRig.add(rotarySelector.group);
-
-controlPanelOverlay.update({
-  rotaryValue: rotarySelector.labels[rotarySelector.state.selectedIndex]
-});
-
-const controlRigController = new DoubleGrabController(controlRig, {
-  proximity: 0.055,
-  intersectionPadding: 0.03,
-  minScale: 0.45,
-  maxScale: 2.5,
-  onReadyChange: (ready) => {
-    controlPanelMaterial.emissiveIntensity = ready ? 0.9 : 0.35;
-    singlePressButton.setReady(ready);
-    toggleButton.setReady(ready);
-    throttleLever.setReady(ready);
-    rotarySelector.setReady(ready);
-    controlPanelOverlay.update({ highlighted: ready });
-  }
-});
-
-function computeButtonTargetDepth(button, state, handStates) {
-  const halfExtents = state.halfExtents;
-  if (!halfExtents) return 0;
-  const padding = state.contactPadding ?? 0.012;
-  const depthBias = state.depthBias ?? 0;
-  let maxDepth = 0;
-
-  for (const handState of handStates) {
-    if (!handState?.visible) continue;
-    const contactPoints = Array.isArray(handState.contactPoints) ? handState.contactPoints : [];
-    for (const point of contactPoints) {
-      buttonWorkVector.copy(point);
-      button.worldToLocal(buttonWorkVector);
-      if (
-        Math.abs(buttonWorkVector.x) <= halfExtents.x + padding &&
-        Math.abs(buttonWorkVector.y) <= halfExtents.y + padding
-      ) {
-        const depth = halfExtents.z - buttonWorkVector.z + depthBias;
-        if (depth > maxDepth) {
-          maxDepth = depth;
+    this.controller = new DoubleGrabController(this.group, {
+      proximity: 0.065,
+      intersectionPadding: 0.04,
+      onReadyChange: (ready) => {
+        Object.values(this.panels).forEach((panel) => panel.setHighlighted(ready));
+        if (typeof onReadyChange === 'function') {
+          onReadyChange(ready);
         }
       }
-    }
-    const pinchPoint = handState.pinch?.position ?? null;
-    if (pinchPoint) {
-      buttonWorkVector.copy(pinchPoint);
-      button.worldToLocal(buttonWorkVector);
-      if (
-        Math.abs(buttonWorkVector.x) <= halfExtents.x + padding &&
-        Math.abs(buttonWorkVector.y) <= halfExtents.y + padding
-      ) {
-        const depth = halfExtents.z - buttonWorkVector.z + depthBias;
-        if (depth > maxDepth) {
-          maxDepth = depth;
-        }
-      }
-    }
-  }
-
-  return THREE.MathUtils.clamp(maxDepth, 0, state.maxPressDepth);
-}
-const clock = new THREE.Clock();
-
-renderer.setAnimationLoop(() => {
-  const delta = clock.getDelta();
-  const elapsed = clock.getElapsedTime();
-
-  controls.update();
-
-  trackers.forEach((tracker) => tracker.update(elapsed, delta));
-
-  const [leftTracker, rightTracker] = trackers;
-  const leftState = leftTracker.state;
-  const rightState = rightTracker.state;
-  const logRigStatus = logRigController.update(leftState, rightState);
-  const controlRigStatus = controlRigController.update(leftState, rightState);
-
-  const singlePressResult = singlePressButton.update(leftState, rightState, delta);
-  const toggleResult = toggleButton.update(leftState, rightState, delta);
-  const throttleResult = throttleLever.update(leftState, rightState, delta);
-  const rotaryResult = rotarySelector.update(leftState, rightState, delta);
-
-  const throttlePercent = Math.round(throttleResult.value * 100);
-  const sliderValueText = throttleResult.activeHand
-    ? `${throttlePercent}% · ${throttleResult.activeHand === 'L' ? 'Left' : 'Right'} hand`
-    : `${throttlePercent}%`;
-  const rotaryLabel = rotaryResult.selectedLabel ?? rotarySelector.labels[rotarySelector.state.selectedIndex];
-  controlPanelOverlay.update({
-    sliderValue: sliderValueText,
-    toggleStatus: toggleResult.toggled ? 'ON' : 'OFF',
-    rotaryValue: rotaryLabel
-  });
-
-  if (singlePressResult.justActivated) {
-    systemMessages.unshift('Single press activated');
-    systemMessages.splice(12);
-  }
-
-  leftLogPanel.setLines(leftTracker.getLogLines());
-  rightLogPanel.setLines(rightTracker.getLogLines());
-
-  const generalLines = [];
-  const activePinches = Object.entries(pinchTelemetry).filter(([, data]) => data && data.position);
-  if (activePinches.length > 0) {
-    generalLines.push('Active pinches');
-    activePinches.forEach(([label, data]) => {
-      generalLines.push(
-        `${label}: pos (${formatVec3(data.position)})`,
-        `${label}: speed ${data.speed.toFixed(3)} m/s`
-      );
     });
   }
 
-  generalLines.push(
-    `Single press ready: ${singlePressButton.state.ready ? 'YES' : 'no'}`,
-    `Toggle button: ${toggleResult.toggled ? 'ON' : 'OFF'}`,
-    `Throttle lever: ${throttlePercent}% (${throttleResult.value.toFixed(2)})`,
-    `Gear selector: ${rotaryLabel}`
-  );
-
-  const statusLines = [];
-  if (logRigStatus.grabbing) {
-    statusLines.push('Adjusting log cluster…', `Scale ×${logRig.scale.x.toFixed(2)}`);
-  }
-  if (controlRigStatus.grabbing) {
-    statusLines.push('Moving control panel…');
-  }
-  if (throttleResult.activeHand) {
-    const throttleHandLabel = throttleResult.activeHand === 'L' ? 'left' : 'right';
-    statusLines.push(`Adjusting throttle lever (${throttleHandLabel} hand)…`);
-  }
-  if (rotaryResult.grabbing) {
-    statusLines.push('Rotating gear selector…');
-  }
-  if (statusLines.length > 0) {
-    generalLines.push('—', ...statusLines);
+  setLeftLines(lines) {
+    this.panels.left.setLines(lines);
   }
 
-  if (systemMessages.length) {
-    generalLines.push('—', ...systemMessages);
+  setRightLines(lines) {
+    this.panels.right.setLines(lines);
   }
 
-  systemLogPanel.setLines(generalLines);
-  renderer.render(scene, camera);
-});
+  setSystemLines(lines) {
+    this.panels.system.setLines(lines);
+  }
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  update(leftState, rightState) {
+    return this.controller.update(leftState, rightState);
+  }
+}
+class ControlPanel {
+  constructor({
+    position = new THREE.Vector3(-0.78, 1.25, -1.05),
+    rotation = new THREE.Euler(0, Math.PI / 8, 0),
+    header = 'Controls'
+  } = {}) {
+    this.group = new THREE.Group();
+    if (position instanceof THREE.Vector3) {
+      this.group.position.copy(position);
+    } else if (Array.isArray(position)) {
+      this.group.position.fromArray(position);
+    } else if (position && typeof position === 'object') {
+      this.group.position.set(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+    }
+    if (rotation instanceof THREE.Euler) {
+      this.group.rotation.copy(rotation);
+    } else if (Array.isArray(rotation)) {
+      this.group.rotation.set(rotation[0] ?? 0, rotation[1] ?? 0, rotation[2] ?? 0);
+    } else if (rotation && typeof rotation === 'object') {
+      this.group.rotation.set(rotation.x ?? 0, rotation.y ?? 0, rotation.z ?? 0);
+    }
+
+    this.overlayHeader = header;
+    this.ready = false;
+    this.controls = [];
+    this.controlMap = new Map();
+    this.overlayEntries = [];
+    this.overlayDirty = true;
+
+    this.panelMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0c1f2b,
+      emissive: 0x062b3f,
+      emissiveIntensity: 0.35,
+      metalness: 0.2,
+      roughness: 0.65,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide
+    });
+    this.panelMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.44), this.panelMaterial);
+    this.group.add(this.panelMesh);
+
+    const frameMaterial = new THREE.MeshBasicMaterial({
+      color: 0x031018,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide
+    });
+    this.frameMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.48), frameMaterial);
+    this.frameMesh.position.set(0, 0, -0.01);
+    this.group.add(this.frameMesh);
+
+    this.overlay = new ControlPanelOverlay();
+    this.group.add(this.overlay.mesh);
+
+    this.controller = new DoubleGrabController(this.group, {
+      proximity: 0.055,
+      intersectionPadding: 0.03,
+      minScale: 0.45,
+      maxScale: 2.5,
+      onReadyChange: (ready) => {
+        this.setReady(ready);
+      }
+    });
+
+    this.refreshOverlay(true);
+  }
+
+  addControl(control) {
+    this.controls.push(control);
+    this.controlMap.set(control.id, control);
+  }
+
+  addOverlayEntry(entry) {
+    const normalized = {
+      id: entry.id,
+      title: entry.title ?? 'Control',
+      valueLabel: entry.valueLabel ?? 'Value',
+      value: entry.value ?? '—',
+      hint: entry.hint ?? '',
+      accent: entry.accent ?? '#00ffcc'
+    };
+    this.overlayEntries.push(normalized);
+    this.overlayDirty = true;
+    return normalized;
+  }
+
+  updateOverlayEntry(id, next = {}) {
+    const entry = this.overlayEntries.find((item) => item.id === id);
+    if (!entry) return;
+    let changed = false;
+    ['title', 'valueLabel', 'value', 'hint', 'accent'].forEach((key) => {
+      if (next[key] !== undefined && entry[key] !== next[key]) {
+        entry[key] = next[key];
+        changed = true;
+      }
+    });
+    if (changed) {
+      this.overlayDirty = true;
+    }
+  }
+
+  refreshOverlay(force = false) {
+    if (!this.overlayDirty && !force) return;
+    const columns = this.overlayEntries.map((entry) => ({ ...entry }));
+    this.overlay.update({
+      header: this.overlayHeader,
+      highlighted: this.ready,
+      columns
+    });
+    this.overlayDirty = false;
+  }
+
+  setReady(ready) {
+    if (this.ready === ready) return;
+    this.ready = ready;
+    this.panelMaterial.emissiveIntensity = ready ? 0.9 : 0.35;
+    this.controls.forEach((control) => {
+      if (typeof control.setReady === 'function') {
+        control.setReady(ready);
+      }
+    });
+    this.overlayDirty = true;
+  }
+
+  addMomentaryButton({
+    id,
+    position,
+    buttonOptions = {},
+    overlay = {},
+    onPress = null
+  } = {}) {
+    const button = new PanelButton({ position, ...buttonOptions });
+    this.group.add(button.mesh);
+    button.setReady(this.ready);
+
+    this.addOverlayEntry({
+      id,
+      title: overlay.title ?? 'Momentary Button',
+      valueLabel: overlay.valueLabel ?? 'Status',
+      value: overlay.value ?? 'Ready',
+      hint: overlay.hint ?? 'Tap to activate',
+      accent: overlay.accent ?? '#00d4ff'
+    });
+
+    const control = {
+      id,
+      type: 'momentary',
+      setReady: (ready) => button.setReady(ready),
+      update: (leftState, rightState, delta) => {
+        const result = button.update(leftState, rightState, delta);
+        if (result.justActivated && typeof onPress === 'function') {
+          onPress(result);
+        }
+        return result;
+      }
+    };
+    this.addControl(control);
+    return control;
+  }
+
+  addToggleButton({
+    id,
+    position,
+    toggleOptions = {},
+    overlay = {},
+    onToggle = null
+  } = {}) {
+    const options = { ...toggleOptions };
+    delete options.onToggle;
+    const toggleButton = new PanelToggleButton({ position, ...options, onToggle: null });
+    this.group.add(toggleButton.mesh);
+    toggleButton.setReady(this.ready);
+
+    const overlayConfig = {
+      onValue: overlay.onValue ?? 'ON',
+      offValue: overlay.offValue ?? 'OFF',
+      onAccent: overlay.onAccent ?? '#00ffcc',
+      offAccent: overlay.offAccent ?? '#ff9ebd'
+    };
+
+    this.addOverlayEntry({
+      id,
+      title: overlay.title ?? 'Toggle Button',
+      valueLabel: overlay.valueLabel ?? 'State',
+      value: toggleButton.toggled ? overlayConfig.onValue : overlayConfig.offValue,
+      hint: overlay.hint ?? 'Tap to toggle',
+      accent: toggleButton.toggled ? overlayConfig.onAccent : overlayConfig.offAccent
+    });
+
+    const control = {
+      id,
+      type: 'toggle',
+      setReady: (ready) => toggleButton.setReady(ready),
+      update: (leftState, rightState, delta) => {
+        const result = toggleButton.update(leftState, rightState, delta);
+        const value = result.toggled ? overlayConfig.onValue : overlayConfig.offValue;
+        const accent = result.toggled ? overlayConfig.onAccent : overlayConfig.offAccent;
+        this.updateOverlayEntry(id, { value, accent });
+        if (result.justActivated && typeof onToggle === 'function') {
+          onToggle(result.toggled, result);
+        }
+        return result;
+      }
+    };
+    this.addControl(control);
+    return control;
+  }
+
+  addThrottleLever({
+    id,
+    position,
+    leverOptions = {},
+    overlay = {},
+    onChange = null
+  } = {}) {
+    const options = { ...leverOptions };
+    delete options.onValueChange;
+    const lever = new ThrottleLeverControl({
+      position,
+      ...options,
+      onValueChange: (value, hand) => {
+        if (typeof onChange === 'function') {
+          onChange(value, hand);
+        }
+      }
+    });
+    this.group.add(lever.group);
+    lever.setReady(this.ready);
+
+    const initialValue = options.initialValue ?? lever.state.currentValue ?? 0;
+    const initialPercent = Math.round(initialValue * 100);
+
+    this.addOverlayEntry({
+      id,
+      title: overlay.title ?? 'Throttle Lever',
+      valueLabel: overlay.valueLabel ?? 'Value',
+      value: overlay.value ?? `${initialPercent}%`,
+      hint: overlay.hint ?? 'Grab the handle to adjust',
+      accent: overlay.accent ?? '#00ffcc'
+    });
+
+    const control = {
+      id,
+      type: 'slider',
+      setReady: (ready) => lever.setReady(ready),
+      update: (leftState, rightState, delta) => {
+        const result = lever.update(leftState, rightState, delta);
+        const percent = Math.round(result.value * 100);
+        let label = `${percent}%`;
+        if (result.activeHand) {
+          label = `${percent}% · ${result.activeHand === 'L' ? 'Left' : 'Right'} hand`;
+        }
+        this.updateOverlayEntry(id, { value: label });
+        return result;
+      }
+    };
+    this.addControl(control);
+    return control;
+  }
+
+  addRotarySelector({
+    id,
+    position,
+    labels,
+    selectorOptions = {},
+    overlay = {},
+    onChange = null
+  } = {}) {
+    const options = { ...selectorOptions };
+    delete options.onSelectionChange;
+    const selector = new RotarySelectorControl({
+      position,
+      labels,
+      ...options,
+      onSelectionChange: (label, index) => {
+        if (typeof onChange === 'function') {
+          onChange(label, index);
+        }
+      }
+    });
+    this.group.add(selector.group);
+    selector.setReady(this.ready);
+
+    const initialLabel = selector.labels[selector.state.selectedIndex];
+
+    this.addOverlayEntry({
+      id,
+      title: overlay.title ?? 'Rotary Selector',
+      valueLabel: overlay.valueLabel ?? 'Selected',
+      value: overlay.value ?? initialLabel,
+      hint: overlay.hint ?? 'Rotate the cog to browse the list',
+      accent: overlay.accent ?? '#ffd27a'
+    });
+
+    const control = {
+      id,
+      type: 'rotary',
+      setReady: (ready) => selector.setReady(ready),
+      update: (leftState, rightState, delta) => {
+        const result = selector.update(leftState, rightState, delta);
+        this.updateOverlayEntry(id, { value: result.selectedLabel });
+        return result;
+      }
+    };
+    this.addControl(control);
+    return control;
+  }
+
+  update(leftState, rightState, delta) {
+    const rigStatus = this.controller.update(leftState, rightState);
+    const results = {};
+    this.controls.forEach((control) => {
+      const result = control.update(leftState, rightState, delta);
+      control.lastResult = result;
+      results[control.id] = result;
+    });
+    this.refreshOverlay();
+    return { ...rigStatus, controls: results };
+  }
+}
+class VRTorApp {
+  constructor() {
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x101218);
+
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
+    this.camera.position.set(0, 1.6, 3);
+
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.xr.enabled = true;
+    this.renderer.xr.setReferenceSpaceType('local-floor');
+    document.body.appendChild(this.renderer.domElement);
+
+    const xrButton = XRButton.createButton(this.renderer, {
+      requiredFeatures: ['local-floor'],
+      optionalFeatures: ['hand-tracking']
+    });
+    document.getElementById('enter').appendChild(xrButton);
+
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.target.set(0, 1.5, 0);
+    this.controls.enableDamping = true;
+
+    this.clock = new THREE.Clock();
+    this.pinchTelemetry = { L: null, R: null };
+    this.systemMessages = [];
+    this.singlePressResetTimeout = null;
+
+    this.setupEnvironment();
+    this.setupHands();
+    this.setupUI();
+
+    window.addEventListener('resize', () => this.handleResize());
+    window.addEventListener('error', (event) => {
+      this.recordSystemMessage(`Error: ${event.message}`);
+    });
+  }
+
+  setupEnvironment() {
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(1, 2, 1);
+    this.scene.add(dir);
+
+    const grid = new THREE.GridHelper(10, 20, 0x333333, 0x222222);
+    grid.position.y = 0;
+    this.scene.add(grid);
+
+    const torusMaterial = new THREE.MeshStandardMaterial({
+      color: 0x55ffee,
+      emissive: 0x08263a,
+      metalness: 0.35,
+      roughness: 0.15,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    const torus = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 64, 128), torusMaterial);
+    torus.position.set(0, 1.5, 0);
+    torus.rotation.x = Math.PI / 2;
+    this.scene.add(torus);
+
+    const torusLabel = createLabelSprite('VRTOR', {
+      width: 0.38,
+      fontSize: 160,
+      color: '#f1f6ff',
+      strokeStyle: 'rgba(0, 0, 0, 0.5)',
+      renderOrder: 15,
+      depthTest: false
+    });
+    const torusParams = torus.geometry.parameters;
+    const torusLabelOffset = torusParams.radius - torusParams.tube * 0.5;
+    torusLabel.position.set(0, 0, torusLabelOffset);
+    torusLabel.material.depthTest = false;
+    torusLabel.material.depthWrite = false;
+    torus.add(torusLabel);
+  }
+
+  setupHands() {
+    const handFactory = new XRHandModelFactory();
+
+    this.leftHand = this.renderer.xr.getHand(0);
+    this.leftHand.add(handFactory.createHandModel(this.leftHand, 'spheres'));
+    this.leftHand.userData.which = 'L';
+    this.scene.add(this.leftHand);
+
+    this.rightHand = this.renderer.xr.getHand(1);
+    this.rightHand.add(handFactory.createHandModel(this.rightHand, 'spheres'));
+    this.rightHand.userData.which = 'R';
+    this.scene.add(this.rightHand);
+
+    this.trackers = [
+      new HandTracker(this.leftHand, 'L'),
+      new HandTracker(this.rightHand, 'R')
+    ];
+
+    this.trackers.forEach((tracker) => {
+      tracker.on('pinch', ({ label, pinch }) => {
+        this.pinchTelemetry[label] = {
+          position: pinch.position ? pinch.position.clone() : null,
+          speed: pinch.speed
+        };
+      });
+
+      tracker.on('pinchend', ({ label }) => {
+        this.pinchTelemetry[label] = null;
+      });
+    });
+  }
+
+  setupUI() {
+    this.logCluster = new LogCluster();
+    this.scene.add(this.logCluster.group);
+
+    this.controlPanel = new ControlPanel();
+    this.scene.add(this.controlPanel.group);
+
+    this.configureControlPanel();
+  }
+
+  configureControlPanel() {
+    this.controlPanel.addMomentaryButton({
+      id: 'singlePress',
+      position: new THREE.Vector3(-0.45, -0.03, 0.06),
+      overlay: {
+        title: 'Single Press',
+        valueLabel: 'Status',
+        value: 'Ready',
+        hint: 'Tap to log an event',
+        accent: '#00d4ff'
+      },
+      onPress: () => {
+        this.recordSystemMessage('Single press activated');
+        this.controlPanel.updateOverlayEntry('singlePress', { value: 'Activated!' });
+        clearTimeout(this.singlePressResetTimeout);
+        this.singlePressResetTimeout = setTimeout(() => {
+          this.controlPanel.updateOverlayEntry('singlePress', { value: 'Ready' });
+        }, 1200);
+      }
+    });
+
+    this.controlPanel.addToggleButton({
+      id: 'toggle',
+      position: new THREE.Vector3(-0.15, -0.03, 0.06),
+      toggleOptions: {
+        offColor: 0xff5fa2,
+        offActiveColor: 0xff8cc4,
+        onColor: 0x4dffc3,
+        onActiveColor: 0x8dffe0,
+        emissiveColor: 0x3a001f,
+        activationThreshold: 0.95,
+        releaseThreshold: 0.35
+      },
+      overlay: {
+        title: 'Toggle Button',
+        valueLabel: 'State',
+        hint: 'Alternate colour each tap',
+        onAccent: '#00ffcc',
+        offAccent: '#ff9ebd'
+      },
+      onToggle: (toggled) => {
+        const label = toggled ? 'ON' : 'OFF';
+        this.recordSystemMessage(`Toggle button: ${label}`);
+      }
+    });
+
+    this.controlPanel.addThrottleLever({
+      id: 'throttle',
+      position: new THREE.Vector3(0.18, 0.12, 0.065),
+      leverOptions: {
+        initialValue: 0.4
+      },
+      overlay: {
+        title: 'Throttle Lever',
+        valueLabel: 'Value',
+        hint: 'Grab the handle and move to choose a value',
+        accent: '#00ffcc'
+      }
+    });
+
+    this.controlPanel.addRotarySelector({
+      id: 'rotary',
+      position: new THREE.Vector3(0.5, 0.02, 0.06),
+      labels: ['Apple', 'Banana', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig'],
+      overlay: {
+        title: 'Gear Selector',
+        valueLabel: 'Selected',
+        hint: 'Rotate the cog to browse the list',
+        accent: '#ffd27a'
+      },
+      onChange: (label) => {
+        this.recordSystemMessage(`Selector set to: ${label}`);
+      }
+    });
+  }
+
+  recordSystemMessage(message) {
+    this.systemMessages.unshift(message);
+    this.systemMessages.splice(12);
+  }
+
+  handleResize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  start() {
+    this.renderer.setAnimationLoop(() => this.update());
+  }
+
+  update() {
+    const delta = this.clock.getDelta();
+    const elapsed = this.clock.getElapsedTime();
+
+    this.controls.update();
+
+    this.trackers.forEach((tracker) => tracker.update(elapsed, delta));
+    const [leftTracker, rightTracker] = this.trackers;
+    const leftState = leftTracker.state;
+    const rightState = rightTracker.state;
+
+    const logStatus = this.logCluster.update(leftState, rightState);
+    const panelStatus = this.controlPanel.update(leftState, rightState, delta);
+    const controlResults = panelStatus.controls ?? {};
+    const toggleResult = controlResults.toggle ?? null;
+    const throttleResult = controlResults.throttle ?? null;
+    const rotaryResult = controlResults.rotary ?? null;
+
+    const throttlePercent = throttleResult ? Math.round(throttleResult.value * 100) : 0;
+    const rotaryLabel = rotaryResult?.selectedLabel ?? '—';
+
+    const generalLines = [];
+    const activePinches = Object.entries(this.pinchTelemetry).filter(([, data]) => data && data.position);
+    if (activePinches.length > 0) {
+      generalLines.push('Active pinches');
+      activePinches.forEach(([label, data]) => {
+        generalLines.push(
+          `${label}: pos (${formatVec3(data.position)})`,
+          `${label}: speed ${data.speed.toFixed(3)} m/s`
+        );
+      });
+    }
+
+    generalLines.push(
+      `Single press ready: ${this.controlPanel.ready ? 'YES' : 'no'}`,
+      `Toggle button: ${toggleResult?.toggled ? 'ON' : 'OFF'}`,
+      `Throttle lever: ${throttlePercent}% (${(throttleResult?.value ?? 0).toFixed(2)})`,
+      `Gear selector: ${rotaryLabel}`
+    );
+
+    const statusLines = [];
+    if (logStatus?.grabbing) {
+      statusLines.push('Adjusting log cluster…', `Scale ×${this.logCluster.group.scale.x.toFixed(2)}`);
+    }
+    if (panelStatus?.grabbing) {
+      statusLines.push('Moving control panel…');
+    }
+    if (throttleResult?.activeHand) {
+      const throttleHandLabel = throttleResult.activeHand === 'L' ? 'left' : 'right';
+      statusLines.push(`Adjusting throttle lever (${throttleHandLabel} hand)…`);
+    }
+    if (rotaryResult?.grabbing) {
+      statusLines.push('Rotating gear selector…');
+    }
+    if (statusLines.length > 0) {
+      generalLines.push('—', ...statusLines);
+    }
+
+    if (this.systemMessages.length) {
+      generalLines.push('—', ...this.systemMessages);
+    }
+
+    this.logCluster.setLeftLines(leftTracker.getLogLines());
+    this.logCluster.setRightLines(rightTracker.getLogLines());
+    this.logCluster.setSystemLines(generalLines);
+
+    this.renderer.render(this.scene, this.camera);
+  }
+}
+
+const app = new VRTorApp();
+app.start();
