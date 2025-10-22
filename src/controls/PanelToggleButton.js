@@ -39,7 +39,6 @@ export class PanelToggleButton {
       emissiveColor,
       emissiveConfig: mergedEmissive.off,
       maxPressDepth: 0.045,
-      damping: 18,
       activationThreshold,
       releaseThreshold,
       contactPadding: 0.012,
