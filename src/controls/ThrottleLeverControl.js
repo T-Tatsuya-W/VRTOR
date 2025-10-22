@@ -24,9 +24,7 @@ export class ThrottleLeverControl {
       emissive: 0x022130,
       emissiveIntensity: 0.45,
       metalness: 0.5,
-      roughness: 0.38,
-      transparent: true,
-      opacity: 0.92
+      roughness: 0.38
     });
 
     this.handleMaterial = new THREE.MeshStandardMaterial({
@@ -34,9 +32,7 @@ export class ThrottleLeverControl {
       emissive: 0x032a34,
       emissiveIntensity: 0.8,
       metalness: 0.55,
-      roughness: 0.32,
-      transparent: true,
-      opacity: 0.96
+      roughness: 0.32
     });
 
     const track = new THREE.Mesh(new THREE.BoxGeometry(0.12, maxPosition - minPosition + 0.2, 0.05), this.trackMaterial);

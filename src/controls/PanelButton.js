@@ -16,8 +16,9 @@ export class PanelButton {
     releaseThreshold = 0.2,
     contactPadding = 0.012,
     depthBias = 0.003,
-    metalness = 0.45,
-    roughness = 0.4
+    metalness = 0.08,
+    roughness = 0.85,
+    flatShading = true
   } = {}) {
     this.colors = {
       base: new THREE.Color(baseColor),
@@ -31,14 +32,20 @@ export class PanelButton {
     };
 
     const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth);
+    geometry.computeVertexNormals();
     this.material = new THREE.MeshStandardMaterial({
       color: this.colors.base.clone(),
       emissive: this.emissiveColor.clone(),
       emissiveIntensity: this.emissiveConfig.idle,
       metalness,
-      roughness
+      roughness,
+      flatShading,
+      transparent: false,
+      opacity: 1
     });
     this.mesh = new THREE.Mesh(geometry, this.material);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
     if (position instanceof THREE.Vector3) {
       this.mesh.position.copy(position);
     } else if (Array.isArray(position)) {
