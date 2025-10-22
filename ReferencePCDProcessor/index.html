@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Mic → PCD (Ring + Tuning Needle + Reactivity)</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <header>
+    <button id="start">Start mic</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="resetRot" title="Reset ring rotation">Reset ring</button>
+    <a href="testjsfft2.html" target="_blank" title="Open DFT test page" style="display: inline-block; padding: 8px 12px; background: #444; color: white; text-decoration: none; border-radius: 4px; border: 1px solid #666; font: inherit; cursor: pointer;">🧪 Test DFT</a>
+    <span id="status">Idle</span>
+  </header>
+
+  <details class="settings">
+    <summary><strong>Settings</strong> ⚙️</summary>
+    <div class="settings-content" style="max-height: 70vh; overflow-y: auto; padding-top: 8px;">
+    
+    <!-- AUDIO PROCESSING SECTION -->
+    <h4 style="margin:16px 0 8px 0; opacity:0.8; border-bottom:1px solid color-mix(in oklab, currentColor 20%, transparent); padding-bottom:4px;">🔊 Audio Processing</h4>
+    <div class="row">
+      <label for="windowRange">Window Size</label>
+      <input id="windowRange" type="range" min="11" max="16" step="1" value="14">
+      <span id="windowVal">16384</span>
+      <small>FFT window (2^n samples, larger = better freq resolution)</small>
+    </div>
+    <div class="row">
+      <label for="hopRange">Hop Size</label>
+      <input id="hopRange" type="range" min="8" max="14" step="1" value="10">
+      <span id="hopVal">1024</span>
+      <small>analysis hop (2^n samples, smaller = more updates)</small>
+    </div>
+    <div class="row">
+      <label for="minHzRange">Min Freq (Hz)</label>
+      <input id="minHzRange" type="range" min="20" max="200" step="5" value="50">
+      <span id="minHzVal">50 Hz</span>
+      <small>lowest frequency to analyze</small>
+    </div>
+    <div class="row">
+      <label for="maxHzRange">Max Freq (Hz)</label>
+      <input id="maxHzRange" type="range" min="1000" max="8000" step="100" value="5000">
+      <span id="maxHzVal">5000 Hz</span>
+      <small>highest frequency to analyze</small>
+    </div>
+    <div class="row">
+      <label for="refA4Input">Reference A4</label>
+      <input id="refA4Input" type="number" min="400" max="480" step="0.1" value="440.0" style="width:80px; padding:6px 8px; border-radius:6px; border:1px solid #888; background:transparent; color:currentColor;">
+      <span style="opacity:0.7">Hz</span>
+      <small>tuning reference (baroque=415, concert=440, etc.)</small>
+    </div>
+    
+    <!-- PCD PROCESSING SECTION -->
+    <h4 style="margin:16px 0 8px 0; opacity:0.8; border-bottom:1px solid color-mix(in oklab, currentColor 20%, transparent); padding-bottom:4px;">📊 PCD Processing</h4>
+    <div class="row">
+      <label for="pcdRmsRange">PCD Min RMS</label>
+      <input id="pcdRmsRange" type="range" min="0" max="0.01" step="0.0001" value="0.001">
+      <span id="pcdRmsVal">0.0010</span>
+      <small>minimum signal level for PCD calculation</small>
+    </div>
+    <div class="row">
+      <label for="pcdThreshRange">PCD Threshold</label>
+      <input id="pcdThreshRange" type="range" min="0" max="0.1" step="0.001" value="0.005">
+      <span id="pcdThreshVal">0.005</span>
+      <small>minimum magnitude to include in PCD</small>
+    </div>
+    <div class="row">
+      <label for="smoothRange">PCD Smoothing</label>
+      <input id="smoothRange" type="range" min="0.1" max="0.9" step="0.05" value="0.6">
+      <span id="smoothVal">0.60</span>
+      <small>temporal smoothing (0.1=reactive, 0.9=smooth)</small>
+    </div>
+    <div class="row">
+      <label for="pcdNormRange">PCD Normalize</label>
+      <input id="pcdNormRange" type="range" min="0.5" max="3.0" step="0.1" value="1.0">
+      <span id="pcdNormVal">1.0</span>
+      <small>PCD power scaling (>1 = sharper peaks, <1 = flatter)</small>
+    </div>
+    
+    <!-- TUNING NEEDLE SECTION -->
+    <h4 style="margin:16px 0 8px 0; opacity:0.8; border-bottom:1px solid color-mix(in oklab, currentColor 20%, transparent); padding-bottom:4px;">🎯 Tuning Needle</h4>
+    <div class="row">
+      <label for="reactRange">Reactivity</label>
+      <input id="reactRange" type="range" min="0.05" max="1.00" step="0.01" value="0.35">
+      <span id="reactVal">0.35</span>
+      <small>← smoother | snappier →</small>
+    </div>
+    <div class="row">
+      <label for="promRange">Min Prominence</label>
+      <input id="promRange" type="range" min="0" max="24" step="0.5" value="6">
+      <span id="promVal">6.0 dB</span>
+      <small>peak prominence required to show needle</small>
+    </div>
+    <div class="row">
+      <label for="rmsRange">Needle Min RMS</label>
+      <input id="rmsRange" type="range" min="0" max="0.02" step="0.0005" value="0.003">
+      <span id="rmsVal">0.0030</span>
+      <small>minimum signal level for needle activation</small>
+    </div>
+    <div class="row">
+      <label for="tunerMinRange">Needle Min Freq</label>
+      <input id="tunerMinRange" type="range" min="40" max="150" step="5" value="70">
+      <span id="tunerMinVal">70 Hz</span>
+      <small>lowest frequency for tuning needle</small>
+    </div>
+    <div class="row">
+      <label for="tunerMaxRange">Needle Max Freq</label>
+      <input id="tunerMaxRange" type="range" min="800" max="3000" step="50" value="1800">
+      <span id="tunerMaxVal">1800 Hz</span>
+      <small>highest frequency for tuning needle</small>
+    </div>
+    
+    <!-- DISPLAY SECTION -->
+    <h4 style="margin:16px 0 8px 0; opacity:0.8; border-bottom:1px solid color-mix(in oklab, currentColor 20%, transparent); padding-bottom:4px;">🎵 Display</h4>
+    <div class="row">
+      <label for="noteNames">Note Names</label>
+      <select id="noteNames" style="padding:8px; border-radius:8px; border:1px solid #888; background:transparent; color:currentColor; min-width:140px;">
+        <option value="sharps">Sharps (C#, D#, F#, G#, A#)</option>
+        <option value="flats">Flats (Db, Eb, Gb, Ab, Bb)</option>
+        <option value="mixed">Mixed (C#/Db, D#/Eb, etc.)</option>
+      </select>
+      <small>how to display black keys</small>
+    </div>
+    
+    <!-- 3D VISUALIZATION SECTION -->
+    <h4 style="margin:16px 0 8px 0; opacity:0.8; border-bottom:1px solid color-mix(in oklab, currentColor 20%, transparent); padding-bottom:4px;">🌐 3D Visualization</h4>
+    <div class="row">
+      <label for="show3DData">Show in Torus</label>
+      <select id="show3DData" style="padding:8px; border-radius:8px; border:1px solid #888; background:transparent; color:currentColor; min-width:140px;">
+        <option value="notes">Notes Only</option>
+        <option value="chords">Chords Only</option>
+        <option value="both">Both Notes & Chords</option>
+        <option value="neither">Neither (Empty Torus)</option>
+      </select>
+      <small>what data to display in the 3D torus</small>
+    </div>
+    <div class="row">
+      <label for="waypointSize">Waypoint Size</label>
+      <input id="waypointSize" type="range" min="0.01" max="0.15" step="0.005" value="0.05">
+      <span id="waypointSizeVal">0.050</span>
+      <small>size of the 3D waypoint markers in the torus</small>
+    </div>
+    <div class="row">
+      <label for="trailLength">Audio Trail Length</label>
+      <input id="trailLength" type="range" min="0" max="50" step="1" value="10">
+      <span id="trailLengthVal">10</span>
+      <small>number of previous audio positions to show as trail</small>
+    </div>
+    
+    <!-- DATA DISPLAY SECTION -->
+    <h4 style="margin:16px 0 8px 0; opacity:0.8; border-bottom:1px solid color-mix(in oklab, currentColor 20%, transparent); padding-bottom:4px;">📊 Real-time Data</h4>
+    <div class="row">
+      <label>PCD Values</label>
+      <div style="font-family: monospace; font-size: 11px; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 4px; overflow-x: auto;">
+        <code id="pcdText">[0,0,0,0,0,0,0,0,0,0,0,0]</code>
+      </div>
+      <small>pitch class distribution (C through B)</small>
+    </div>
+    <div class="row">
+      <label>DFT Coefficients</label>
+      <div style="font-family: monospace; font-size: 10px; line-height: 1.3; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 4px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div>
+            <div style="font-weight: bold; margin-bottom: 4px; opacity: 0.8;">Magnitudes:</div>
+            <div id="dft-magnitudes"></div>
+          </div>
+          <div>
+            <div style="font-weight: bold; margin-bottom: 4px; opacity: 0.8;">Phases:</div>
+            <div id="dft-phases"></div>
+          </div>
+        </div>
+      </div>
+      <small>frequency domain representation of PCD</small>
+    </div>
+    <div class="row">
+      <label>Primary Note</label>
+      <div style="font-family: monospace; font-size: 12px; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 4px; min-height: 24px;">
+        <span id="tuneReadout" style="opacity: 0.9;"></span>
+      </div>
+      <small>detected primary note and tuning information</small>
+    </div>
+    </div> <!-- Close settings-content wrapper -->
+  </details>
+
+  <div class="visualizations">
+    <div class="vis-container">
+      <canvas id="ring"></canvas>
+    </div>
+    <div class="vis-container">
+      <div id="cube-container" style="position: relative; width: 100%; height: 100%; overflow: hidden;">
+        <canvas id="cubeCanvas" style="display: block; width: 100%; height: 100%;"></canvas>
+        <div style="position: absolute; top: 10px; left: 10px; font-size: 12px; opacity: 0.7; pointer-events: none; z-index: 10;">
+          3D Torus Visualization<br>
+          <small>Click and drag to rotate</small>
+        </div>
+        <button id="reset3D" style="position: absolute; top: 10px; right: 50px; padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.5); color: white; cursor: pointer; font-size: 11px; z-index: 10; backdrop-filter: blur(4px);" title="Reset torus orientation">
+          ↻ Reset
+        </button>
+        <button id="fullscreen3D" style="position: absolute; top: 10px; right: 10px; padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.5); color: white; cursor: pointer; font-size: 11px; z-index: 10; backdrop-filter: blur(4px);" title="Toggle fullscreen">
+          ⛶ Full
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+    <!-- Clean footer - all data moved to settings -->
+  </footer>
+
+<script type="module" src="script.js"></script>
+</body>
+</html>
