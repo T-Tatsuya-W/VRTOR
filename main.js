@@ -84,6 +84,122 @@ function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
   return cursorY;
 }
 
+class AudioVolumeMonitor {
+  constructor({ fftSize = 1024, smoothing = 0.7, normalization = 4 } = {}) {
+    this.options = {
+      fftSize,
+      smoothing: THREE.MathUtils.clamp(smoothing, 0, 0.99),
+      normalization: normalization > 0 ? normalization : 4
+    };
+    this.state = {
+      status: 'idle',
+      level: 0,
+      rms: 0,
+      error: null
+    };
+    this.audioContext = null;
+    this.analyser = null;
+    this.stream = null;
+    this.source = null;
+    this.dataArray = null;
+  }
+
+  getStatus() {
+    return this.state.status;
+  }
+
+  getErrorMessage() {
+    return this.state.error ? this.state.error.message ?? String(this.state.error) : null;
+  }
+
+  getStatusDescription() {
+    switch (this.state.status) {
+      case 'pending':
+        return 'awaiting permission';
+      case 'active':
+        return 'active';
+      case 'error':
+        return this.getErrorMessage() ? `error: ${this.getErrorMessage()}` : 'error';
+      default:
+        return 'idle';
+    }
+  }
+
+  async start() {
+    if (this.state.status === 'active' || this.state.status === 'pending') {
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.state.status = 'error';
+      this.state.error = new Error('Microphone access is not supported in this browser');
+      throw this.state.error;
+    }
+
+    this.state.status = 'pending';
+
+    try {
+      const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextConstructor) {
+        throw new Error('Web Audio API is not available');
+      }
+
+      this.audioContext = new AudioContextConstructor();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.stream = stream;
+      this.source = this.audioContext.createMediaStreamSource(stream);
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = this.options.fftSize;
+      this.dataArray = new Float32Array(this.analyser.fftSize);
+      this.source.connect(this.analyser);
+      this.state.status = 'active';
+      this.state.error = null;
+    } catch (error) {
+      this.state.status = 'error';
+      this.state.error = error instanceof Error ? error : new Error(String(error));
+      throw this.state.error;
+    }
+  }
+
+  async resume() {
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      try {
+        await this.audioContext.resume();
+      } catch (error) {
+        if (!this.state.error) {
+          this.state.error = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+    }
+  }
+
+  update() {
+    if (this.state.status !== 'active' || !this.analyser || !this.dataArray) {
+      return { level: 0, rms: 0 };
+    }
+
+    if (this.audioContext?.state === 'suspended') {
+      this.resume();
+    }
+
+    this.analyser.getFloatTimeDomainData(this.dataArray);
+    let sumSquares = 0;
+    for (let i = 0; i < this.dataArray.length; i += 1) {
+      const sample = this.dataArray[i];
+      sumSquares += sample * sample;
+    }
+
+    const rms = Math.sqrt(sumSquares / this.dataArray.length);
+    const normalized = Math.min(1, rms * this.options.normalization);
+    const smoothing = this.options.smoothing;
+
+    this.state.level = smoothing * this.state.level + (1 - smoothing) * normalized;
+    this.state.rms = smoothing * this.state.rms + (1 - smoothing) * rms;
+
+    return { level: this.state.level, rms: this.state.rms };
+  }
+}
+
 class HandTracker {
   constructor(hand, label) {
     this.hand = hand;
@@ -1832,6 +1948,211 @@ class ControlPanel {
     return { ...rigStatus, controls: results };
   }
 }
+
+class SoundPanel {
+  constructor({
+    position = new THREE.Vector3(0, 0.95, -1.32),
+    rotation = new THREE.Euler(0, 0, 0),
+    header = 'Sound Monitor',
+    historyLength = 120
+  } = {}) {
+    this.group = new THREE.Group();
+    if (position instanceof THREE.Vector3) {
+      this.group.position.copy(position);
+    } else if (Array.isArray(position)) {
+      this.group.position.fromArray(position);
+    } else if (position && typeof position === 'object') {
+      this.group.position.set(position.x ?? 0, position.y ?? 0, position.z ?? 0);
+    }
+    if (rotation instanceof THREE.Euler) {
+      this.group.rotation.copy(rotation);
+    } else if (Array.isArray(rotation)) {
+      this.group.rotation.set(rotation[0] ?? 0, rotation[1] ?? 0, rotation[2] ?? 0);
+    } else if (rotation && typeof rotation === 'object') {
+      this.group.rotation.set(rotation.x ?? 0, rotation.y ?? 0, rotation.z ?? 0);
+    }
+
+    this.header = header;
+    this.historyLength = Math.max(2, Math.floor(historyLength));
+    this.history = new Array(this.historyLength).fill(0);
+    this.state = {
+      ready: false,
+      status: 'Initializing microphone…',
+      statusType: 'info',
+      level: 0,
+      rms: 0
+    };
+    this.dirty = true;
+
+    this.panelMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0c1f2b,
+      emissive: 0x062b3f,
+      emissiveIntensity: 0.45,
+      metalness: 0.25,
+      roughness: 0.62,
+      transparent: true,
+      opacity: 0.92,
+      side: THREE.DoubleSide
+    });
+    this.panelMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.66), this.panelMaterial);
+    this.group.add(this.panelMesh);
+
+    const frameMaterial = new THREE.MeshBasicMaterial({
+      color: 0x031018,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide
+    });
+    this.frameMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.7), frameMaterial);
+    this.frameMesh.position.set(0, 0, -0.012);
+    this.group.add(this.frameMesh);
+
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = 768;
+    this.canvas.height = 432;
+    this.ctx = this.canvas.getContext('2d');
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    this.texture.minFilter = THREE.LinearFilter;
+    this.texture.magFilter = THREE.LinearFilter;
+
+    const graphMaterial = new THREE.MeshBasicMaterial({
+      map: this.texture,
+      transparent: true
+    });
+    graphMaterial.depthTest = false;
+    graphMaterial.depthWrite = false;
+    this.graphMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.62), graphMaterial);
+    this.graphMesh.position.set(0, 0, 0.004);
+    this.graphMesh.renderOrder = 15;
+    this.group.add(this.graphMesh);
+
+    this.controller = new DoubleGrabController(this.group, {
+      proximity: 0.055,
+      intersectionPadding: 0.03,
+      minScale: 0.5,
+      maxScale: 2.2,
+      onReadyChange: (ready) => this.setReady(ready)
+    });
+
+    this.render();
+  }
+
+  setReady(ready) {
+    if (this.state.ready === ready) return;
+    this.state.ready = ready;
+    this.panelMaterial.emissiveIntensity = ready ? 0.95 : 0.45;
+    this.invalidate();
+  }
+
+  setStatus(status, { type = 'info' } = {}) {
+    const nextType = type === 'error' ? 'error' : 'info';
+    if (this.state.status === status && this.state.statusType === nextType) {
+      return;
+    }
+    this.state.status = status;
+    this.state.statusType = nextType;
+    this.invalidate();
+  }
+
+  updateMeter({ level = 0, rms = 0 } = {}) {
+    const clampedLevel = Math.min(Math.max(level, 0), 1);
+    this.history.push(clampedLevel);
+    if (this.history.length > this.historyLength) {
+      this.history.shift();
+    }
+    this.state.level = clampedLevel;
+    this.state.rms = Math.max(0, rms);
+    this.invalidate();
+  }
+
+  invalidate() {
+    this.dirty = true;
+    this.render();
+  }
+
+  update(leftState, rightState) {
+    return this.controller.update(leftState, rightState);
+  }
+
+  render() {
+    if (!this.dirty) return;
+    this.dirty = false;
+
+    const { ctx, canvas } = this;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const ready = this.state.ready;
+    ctx.fillStyle = ready ? 'rgba(0, 32, 42, 0.82)' : 'rgba(8, 26, 38, 0.62)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = ready ? 'rgba(0, 255, 204, 0.85)' : 'rgba(0, 255, 204, 0.28)';
+    ctx.lineWidth = ready ? 12 : 6;
+    ctx.strokeRect(18, 18, canvas.width - 36, canvas.height - 36);
+
+    ctx.fillStyle = '#d1f8ff';
+    ctx.font = '700 60px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(this.header, 48, 42);
+
+    ctx.font = '500 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillStyle = this.state.statusType === 'error' ? '#ff9ebd' : '#f1f6ff';
+    ctx.fillText(this.state.status, 48, 120);
+
+    const graphLeft = 60;
+    const graphTop = 170;
+    const graphWidth = canvas.width - graphLeft * 2;
+    const graphHeight = 200;
+
+    ctx.fillStyle = 'rgba(3, 24, 33, 0.72)';
+    ctx.fillRect(graphLeft, graphTop, graphWidth, graphHeight);
+
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.16)';
+    ctx.lineWidth = 2;
+    const horizontalDivisions = 4;
+    for (let i = 1; i < horizontalDivisions; i += 1) {
+      const y = graphTop + (graphHeight / horizontalDivisions) * i;
+      ctx.beginPath();
+      ctx.moveTo(graphLeft, y);
+      ctx.lineTo(graphLeft + graphWidth, y);
+      ctx.stroke();
+    }
+
+    const points = this.history;
+    if (points.length > 1) {
+      ctx.beginPath();
+      points.forEach((value, index) => {
+        const x = graphLeft + (graphWidth * index) / (points.length - 1);
+        const y = graphTop + graphHeight - value * graphHeight;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.lineTo(graphLeft + graphWidth, graphTop + graphHeight);
+      ctx.lineTo(graphLeft, graphTop + graphHeight);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0, 255, 204, 0.2)';
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#00ffcc';
+      ctx.stroke();
+    }
+
+    const percent = Math.round(this.state.level * 100);
+    ctx.fillStyle = '#00ffcc';
+    ctx.font = '600 40px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillText(`Level: ${percent}%`, 48, graphTop + graphHeight + 36);
+
+    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
+    ctx.font = '500 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillText(`RMS: ${this.state.rms.toFixed(3)}`, 320, graphTop + graphHeight + 36);
+
+    this.texture.needsUpdate = true;
+  }
+}
+
 class VRTorApp {
   constructor() {
     this.scene = new THREE.Scene();
@@ -1867,6 +2188,11 @@ class VRTorApp {
     this.torusController = null;
     this.torusMesh = null;
     this.torusPanel = null;
+    this.soundPanel = null;
+    this.audioMonitor = null;
+    this.audioLevels = { level: 0, rms: 0 };
+    this.lastAudioMonitorStatus = null;
+    this.lastAudioErrorMessage = null;
 
     this.setupEnvironment();
     this.setupHands();
@@ -1981,6 +2307,7 @@ class VRTorApp {
 
     this.configureControlPanel();
     this.configureTorusPanel();
+    this.setupSoundPanel();
   }
 
   configureControlPanel() {
@@ -2088,6 +2415,44 @@ class VRTorApp {
     });
   }
 
+  setupSoundPanel() {
+    this.soundPanel = new SoundPanel({
+      position: new THREE.Vector3(0, 0.82, -1.32)
+    });
+    this.scene.add(this.soundPanel.group);
+    this.soundPanel.setStatus('Awaiting microphone permission…');
+
+    this.audioMonitor = new AudioVolumeMonitor();
+    this.lastAudioMonitorStatus = this.audioMonitor.getStatus();
+    this.lastAudioErrorMessage = this.audioMonitor.getErrorMessage();
+
+    const handleSuccess = () => {
+      this.lastAudioMonitorStatus = this.audioMonitor.getStatus();
+      this.lastAudioErrorMessage = null;
+      this.soundPanel.setStatus('Microphone active');
+      this.recordSystemMessage('Microphone access granted');
+    };
+
+    const handleError = (error) => {
+      const message = error?.message ?? 'Unable to access microphone';
+      this.lastAudioMonitorStatus = 'error';
+      this.lastAudioErrorMessage = message;
+      this.soundPanel.setStatus(`Microphone error: ${message}`, { type: 'error' });
+      this.recordSystemMessage(`Microphone error: ${message}`);
+    };
+
+    try {
+      const startResult = this.audioMonitor.start();
+      if (startResult && typeof startResult.then === 'function') {
+        startResult.then(handleSuccess).catch(handleError);
+      } else {
+        handleSuccess();
+      }
+    } catch (error) {
+      handleError(error);
+    }
+  }
+
   setTorusMovable(enabled) {
     const next = Boolean(enabled);
     if (this.torusMovable === next) {
@@ -2144,6 +2509,7 @@ class VRTorApp {
     const rotaryResult = controlResults.rotary ?? null;
 
     const torusPanelStatus = this.torusPanel.update(leftState, rightState, delta);
+    const soundPanelStatus = this.soundPanel ? this.soundPanel.update(leftState, rightState) : null;
 
     let torusInteraction = null;
     if (this.torusController) {
@@ -2152,6 +2518,36 @@ class VRTorApp {
       } else {
         this.torusController.release();
       }
+    }
+
+    let audioLevels = { level: 0, rms: 0 };
+    if (this.audioMonitor) {
+      const monitorStatus = this.audioMonitor.getStatus();
+      const errorMessage = this.audioMonitor.getErrorMessage();
+      if (
+        monitorStatus !== this.lastAudioMonitorStatus ||
+        errorMessage !== this.lastAudioErrorMessage
+      ) {
+        this.lastAudioMonitorStatus = monitorStatus;
+        this.lastAudioErrorMessage = errorMessage;
+        if (monitorStatus === 'active') {
+          this.soundPanel?.setStatus('Microphone active');
+        } else if (monitorStatus === 'pending') {
+          this.soundPanel?.setStatus('Awaiting microphone permission…');
+        } else if (monitorStatus === 'error') {
+          const message = errorMessage ?? 'Unable to access microphone';
+          this.soundPanel?.setStatus(`Microphone error: ${message}`, { type: 'error' });
+        } else {
+          this.soundPanel?.setStatus('Microphone idle');
+        }
+      }
+      audioLevels = this.audioMonitor.update();
+      this.audioLevels = audioLevels;
+      this.soundPanel?.updateMeter(audioLevels);
+    } else if (this.soundPanel) {
+      audioLevels = { level: 0, rms: 0 };
+      this.audioLevels = audioLevels;
+      this.soundPanel.updateMeter(audioLevels);
     }
 
     const throttlePercent = throttleResult ? Math.round(throttleResult.value * 100) : 0;
@@ -2177,6 +2573,14 @@ class VRTorApp {
       `Torus mode: ${this.torusMovable ? 'movable torus' : 'locked torus'}`
     );
 
+    if (this.audioMonitor) {
+      const micPercent = Math.round(this.audioLevels.level * 100);
+      generalLines.push(
+        `Microphone status: ${this.audioMonitor.getStatusDescription()}`,
+        `Microphone level: ${micPercent}% (RMS ${this.audioLevels.rms.toFixed(3)})`
+      );
+    }
+
     const statusLines = [];
     if (logStatus?.grabbing) {
       statusLines.push('Adjusting log cluster…', `Scale ×${this.logCluster.group.scale.x.toFixed(2)}`);
@@ -2186,6 +2590,9 @@ class VRTorApp {
     }
     if (torusPanelStatus?.grabbing) {
       statusLines.push('Moving torus control panel…');
+    }
+    if (soundPanelStatus?.grabbing) {
+      statusLines.push('Moving sound panel…');
     }
     if (throttleResult?.activeHand) {
       const throttleHandLabel = throttleResult.activeHand === 'L' ? 'left' : 'right';
