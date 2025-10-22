@@ -275,6 +275,38 @@ function createLabelSprite(message, options = {}) {
   return sprite;
 }
 
+function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
+  if (!text) {
+    return y;
+  }
+
+  const words = `${text}`.split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return y;
+  }
+
+  let line = '';
+  let cursorY = y;
+
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (ctx.measureText(candidate).width > maxWidth && line) {
+      ctx.fillText(line, x, cursorY);
+      line = word;
+      cursorY += lineHeight;
+    } else {
+      line = candidate;
+    }
+  }
+
+  if (line) {
+    ctx.fillText(line, x, cursorY);
+    cursorY += lineHeight;
+  }
+
+  return cursorY;
+}
+
 class LogPanel {
   constructor(title, { width = 1.05, height = 0.55 } = {}) {
     this.title = title;
@@ -363,7 +395,9 @@ class ControlPanelOverlay {
       singleLabel: 'Single Press',
       singleHint: 'Tap to log an event',
       toggleLabel: 'Toggle Button',
-      toggleStatus: 'OFF'
+      toggleStatus: 'OFF',
+      toggleHint: 'Alternate colour each tap',
+      highlighted: false
     };
     this.render();
   }
@@ -380,39 +414,48 @@ class ControlPanelOverlay {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctx.fillStyle = 'rgba(8, 26, 38, 0.55)';
+    const highlighted = Boolean(this.state.highlighted);
+    ctx.fillStyle = highlighted ? 'rgba(0, 32, 42, 0.82)' : 'rgba(8, 26, 38, 0.55)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
-    ctx.lineWidth = 4;
+    ctx.strokeStyle = highlighted ? 'rgba(0, 255, 204, 0.85)' : 'rgba(0, 255, 204, 0.3)';
+    ctx.lineWidth = highlighted ? 10 : 4;
     ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
 
     ctx.fillStyle = '#d1f8ff';
     ctx.font = '700 44px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
     ctx.fillText(this.state.header, 32, 32);
 
     ctx.font = '600 32px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     ctx.fillStyle = '#f1f6ff';
-    ctx.fillText(this.state.singleLabel, 32, 132);
-    ctx.fillText(this.state.toggleLabel, canvas.width * 0.5 + 24, 132);
+    const leftColumnX = 32;
+    const rightColumnX = canvas.width * 0.5 + 24;
+    const columnWidth = canvas.width * 0.5 - 56;
+    ctx.fillText(this.state.singleLabel, leftColumnX, 132);
+    ctx.fillText(this.state.toggleLabel, rightColumnX, 132);
 
     ctx.font = '500 26px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
-    ctx.fillStyle = 'rgba(210, 235, 255, 0.8)';
-    ctx.fillText(this.state.singleHint, 32, 180);
-    ctx.fillText('Alternate colour each tap', canvas.width * 0.5 + 24, 220);
+    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
+    drawWrappedText(ctx, this.state.singleHint, leftColumnX, 180, columnWidth, 30);
 
     ctx.font = '600 30px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
     const toggleActive = this.state.toggleStatus === 'ON';
     ctx.fillStyle = toggleActive ? '#00ffcc' : '#ff9ebd';
     const statusText = `State: ${this.state.toggleStatus}`;
-    ctx.fillText(statusText, canvas.width * 0.5 + 24, 180);
+    const statusY = 180;
+    ctx.fillText(statusText, rightColumnX, statusY);
 
     ctx.beginPath();
     ctx.moveTo(canvas.width * 0.5, 110);
     ctx.lineTo(canvas.width * 0.5, canvas.height - 32);
     ctx.strokeStyle = 'rgba(0, 255, 204, 0.25)';
     ctx.stroke();
+
+    ctx.font = '500 26px "Fira Mono", "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.fillStyle = 'rgba(210, 235, 255, 0.82)';
+    drawWrappedText(ctx, this.state.toggleHint, rightColumnX, statusY + 40, columnWidth, 30);
 
     this.texture.needsUpdate = true;
   }
@@ -430,8 +473,11 @@ class DoubleGrabController {
       ...options
     };
 
-    this.bounds = new THREE.Box3();
+    this.localBounds = new THREE.Box3();
     this.intersectionBounds = new THREE.Box3();
+    this.boundsBox = new THREE.Box3();
+    this.boundsMatrix = new THREE.Matrix4();
+    this.inverseMatrix = new THREE.Matrix4();
     this.engaged = false;
     this.highlighted = false;
     this.initial = {
@@ -448,8 +494,13 @@ class DoubleGrabController {
       direction: new THREE.Vector3(),
       rotationDelta: new THREE.Quaternion(),
       workingQuaternion: new THREE.Quaternion(),
-      nextPosition: new THREE.Vector3()
+      nextPosition: new THREE.Vector3(),
+      leftLocal: new THREE.Vector3(),
+      rightLocal: new THREE.Vector3()
     };
+
+    this.group.updateWorldMatrix(true, true);
+    this.computeLocalBounds();
   }
 
   setHighlight(value) {
@@ -468,40 +519,84 @@ class DoubleGrabController {
     this.setHighlight(false);
   }
 
+  computeLocalBounds() {
+    this.inverseMatrix.copy(this.group.matrixWorld).invert();
+    this.localBounds.makeEmpty();
+
+    this.group.traverse((object) => {
+      const geometry = object.geometry;
+      if (!geometry || (!object.isMesh && !object.isLine && !object.isPoints)) {
+        return;
+      }
+      if (!geometry.boundingBox) {
+        geometry.computeBoundingBox();
+      }
+      if (!geometry.boundingBox) {
+        return;
+      }
+
+      this.boundsBox.copy(geometry.boundingBox);
+      this.boundsMatrix.copy(object.matrixWorld).premultiply(this.inverseMatrix);
+      this.boundsBox.applyMatrix4(this.boundsMatrix);
+      this.localBounds.union(this.boundsBox);
+    });
+
+    if (this.localBounds.isEmpty()) {
+      this.localBounds.setFromCenterAndSize(
+        new THREE.Vector3(),
+        new THREE.Vector3(0.01, 0.01, 0.01)
+      );
+    }
+  }
+
   update(leftState, rightState) {
     const leftPoint = leftState?.palm ?? leftState?.wrist ?? null;
     const rightPoint = rightState?.palm ?? rightState?.wrist ?? null;
 
     this.group.updateWorldMatrix(true, true);
-    this.bounds.setFromObject(this.group);
-    const padding = Math.max(0, this.options.intersectionPadding ?? 0);
-    this.intersectionBounds.copy(this.bounds).expandByScalar(padding);
+    this.computeLocalBounds();
+    const averageScale =
+      (Math.abs(this.group.scale.x) + Math.abs(this.group.scale.y) + Math.abs(this.group.scale.z)) / 3 || 1;
+    const paddingWorld = Math.max(0, this.options.intersectionPadding ?? 0);
+    const paddingLocal = paddingWorld / averageScale;
+    this.intersectionBounds.copy(this.localBounds);
+    if (paddingLocal > 0) {
+      this.intersectionBounds.expandByScalar(paddingLocal);
+    }
 
     const blockedByOther =
       DoubleGrabController.activeController && DoubleGrabController.activeController !== this;
     const proximity = Math.max(0, this.options.proximity ?? 0);
+    const proximityLocal = proximity / averageScale;
     const hasBounds = !this.intersectionBounds.isEmpty();
 
-    const leftDistance = hasBounds && leftPoint
-      ? this.intersectionBounds.distanceToPoint(leftPoint)
+    const leftLocalPoint = leftPoint
+      ? this.temp.leftLocal.copy(leftPoint).applyMatrix4(this.inverseMatrix)
+      : null;
+    const rightLocalPoint = rightPoint
+      ? this.temp.rightLocal.copy(rightPoint).applyMatrix4(this.inverseMatrix)
+      : null;
+
+    const leftDistance = hasBounds && leftLocalPoint
+      ? this.intersectionBounds.distanceToPoint(leftLocalPoint)
       : Infinity;
-    const rightDistance = hasBounds && rightPoint
-      ? this.intersectionBounds.distanceToPoint(rightPoint)
+    const rightDistance = hasBounds && rightLocalPoint
+      ? this.intersectionBounds.distanceToPoint(rightLocalPoint)
       : Infinity;
 
     const leftTouching = Boolean(
       !blockedByOther &&
         leftState?.visible &&
-        leftPoint &&
+        leftLocalPoint &&
         hasBounds &&
-        (this.intersectionBounds.containsPoint(leftPoint) || leftDistance <= proximity)
+        (this.intersectionBounds.containsPoint(leftLocalPoint) || leftDistance <= proximityLocal)
     );
     const rightTouching = Boolean(
       !blockedByOther &&
         rightState?.visible &&
-        rightPoint &&
+        rightLocalPoint &&
         hasBounds &&
-        (this.intersectionBounds.containsPoint(rightPoint) || rightDistance <= proximity)
+        (this.intersectionBounds.containsPoint(rightLocalPoint) || rightDistance <= proximityLocal)
     );
 
     const bothTouching = leftTouching && rightTouching;
@@ -814,6 +909,7 @@ const controlRigController = new DoubleGrabController(controlRig, {
     controlPanelMaterial.emissiveIntensity = ready ? 0.9 : 0.35;
     controlButtonState.ready = ready;
     toggleButtonState.ready = ready;
+    controlPanelOverlay.update({ highlighted: ready });
   }
 });
 
