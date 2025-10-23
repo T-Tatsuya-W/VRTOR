@@ -1,8 +1,6 @@
 import * as THREE from 'three';
 import { PanelButton } from '../controls/PanelButton.js';
 import { PanelToggleButton } from '../controls/PanelToggleButton.js';
-import { ThrottleLeverControl } from '../controls/ThrottleLeverControl.js';
-import { RotarySelectorControl } from '../controls/RotarySelectorControl.js';
 import { DoubleGrabController } from '../interactions/DoubleGrabController.js';
 import { ControlPanelOverlay } from './ControlPanelOverlay.js';
 
@@ -213,106 +211,6 @@ export class ControlPanel {
         if (result.justActivated && typeof onToggle === 'function') {
           onToggle(result.toggled, result);
         }
-        return result;
-      }
-    };
-    this.addControl(control);
-    return control;
-  }
-
-  addThrottleLever({
-    id,
-    position,
-    leverOptions = {},
-    overlay = {},
-    onChange = null
-  } = {}) {
-    const options = { ...leverOptions };
-    delete options.onValueChange;
-    const lever = new ThrottleLeverControl({
-      position,
-      ...options,
-      onValueChange: (value, hand) => {
-        if (typeof onChange === 'function') {
-          onChange(value, hand);
-        }
-      }
-    });
-    this.group.add(lever.group);
-    lever.setReady(this.ready);
-
-    const initialValue = options.initialValue ?? lever.state.currentValue ?? 0;
-    const initialPercent = Math.round(initialValue * 100);
-
-    this.addOverlayEntry({
-      id,
-      title: overlay.title ?? 'Throttle Lever',
-      valueLabel: overlay.valueLabel ?? 'Value',
-      value: overlay.value ?? `${initialPercent}%`,
-      hint: overlay.hint ?? 'Grab the handle to adjust',
-      accent: overlay.accent ?? '#00ffcc'
-    });
-
-    const control = {
-      id,
-      type: 'slider',
-      setReady: (ready) => lever.setReady(ready),
-      update: (leftState, rightState, delta) => {
-        const result = lever.update(leftState, rightState, delta);
-        const percent = Math.round(result.value * 100);
-        let label = `${percent}%`;
-        if (result.activeHand) {
-          label = `${percent}% · ${result.activeHand === 'L' ? 'Left' : 'Right'} hand`;
-        }
-        this.updateOverlayEntry(id, { value: label });
-        return result;
-      }
-    };
-    this.addControl(control);
-    return control;
-  }
-
-  addRotarySelector({
-    id,
-    position,
-    labels,
-    selectorOptions = {},
-    overlay = {},
-    onChange = null
-  } = {}) {
-    const options = { ...selectorOptions };
-    delete options.onSelectionChange;
-    const selector = new RotarySelectorControl({
-      position,
-      labels,
-      ...options,
-      onSelectionChange: (label, index) => {
-        if (typeof onChange === 'function') {
-          onChange(label, index);
-        }
-      }
-    });
-    this.group.add(selector.group);
-    selector.setReady(this.ready);
-
-    const initialLabel = selector.labels[selector.state.selectedIndex];
-
-    this.addOverlayEntry({
-      id,
-      title: overlay.title ?? 'Rotary Selector',
-      valueLabel: overlay.valueLabel ?? 'Selected',
-      value: overlay.value ?? initialLabel,
-      hint: overlay.hint ?? 'Rotate the cog to browse the list',
-      accent: overlay.accent ?? '#ffd27a'
-    });
-
-    const control = {
-      id,
-      type: 'rotary',
-      setReady: (ready) => selector.setReady(ready),
-      update: (leftState, rightState, delta) => {
-        const result = selector.update(leftState, rightState, delta);
-        this.updateOverlayEntry(id, { value: result.selectedLabel });
         return result;
       }
     };
