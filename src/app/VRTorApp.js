@@ -10,6 +10,10 @@ import { ControlPanel } from '../ui/ControlPanel.js';
 import { SoundPanel } from '../ui/SoundPanel.js';
 import { DoubleGrabController } from '../interactions/DoubleGrabController.js';
 
+const DEFAULT_TORUS_RADIUS = 0.6;
+const THICK_TORUS_TUBE_RADIUS = 0.12;
+const THIN_TORUS_TUBE_RADIUS = 0.08;
+
 const STANDARD_NOTE_WAYPOINTS = [
   { label: 'C', pha5: 0, pha3: 0, mag3: 1 },
   { label: 'C#', pha5: -Math.PI * 5 / 6, pha3: -Math.PI / 2, mag3: 1 },
@@ -62,11 +66,14 @@ export class VRTorApp {
     this.torusDataGroup = null;
     this.torusWaypointsGroup = null;
     this.torusAudioMarker = null;
+    this.torusLabel = null;
     this.torusAudioColor = new THREE.Color();
     this.torusAudioEmissive = new THREE.Color();
     this.torusAudioPosition = new THREE.Vector3();
     this.torusWorkVector = new THREE.Vector3();
     this.torusGeometryParams = null;
+    this.torusThicknessMode = 'thick';
+    this.torusThicknessControl = null;
     this.torusPanel = null;
     this.soundPanel = null;
     this.audioMonitor = null;
@@ -118,13 +125,16 @@ export class VRTorApp {
     this.torusGroup.position.set(0, 1.5, 0);
     this.scene.add(this.torusGroup);
 
-    this.torusMesh = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 64, 128), this.torusMaterial);
+    const torusGeometry = new THREE.TorusGeometry(
+      DEFAULT_TORUS_RADIUS,
+      THICK_TORUS_TUBE_RADIUS,
+      64,
+      128
+    );
+    this.torusMesh = new THREE.Mesh(torusGeometry, this.torusMaterial);
     this.torusMesh.rotation.x = Math.PI / 2;
     this.torusGroup.add(this.torusMesh);
-    this.torusGeometryParams = {
-      radius: this.torusMesh.geometry.parameters.radius,
-      tube: this.torusMesh.geometry.parameters.tube
-    };
+    this.torusGeometryParams = { ...torusGeometry.parameters };
 
     const torusLabel = createLabelSprite('VRTOR', {
       width: 0.38,
@@ -134,12 +144,13 @@ export class VRTorApp {
       renderOrder: 15,
       depthTest: false
     });
-    const torusParams = this.torusMesh.geometry.parameters;
+    const torusParams = this.torusGeometryParams;
     const torusLabelOffset = torusParams.radius - torusParams.tube * 0.5;
     torusLabel.position.set(0, 0, torusLabelOffset);
     torusLabel.material.depthTest = false;
     torusLabel.material.depthWrite = false;
     this.torusMesh.add(torusLabel);
+    this.torusLabel = torusLabel;
 
     this.torusDataGroup = new THREE.Group();
     this.torusMesh.add(this.torusDataGroup);
@@ -300,6 +311,37 @@ export class VRTorApp {
         this.recordSystemMessage(`Torus mode: ${toggled ? 'movable torus' : 'locked torus'}`);
       }
     });
+
+    this.torusThicknessControl = this.torusPanel.addToggleButton({
+      id: 'torusThickness',
+      position: new THREE.Vector3(0.28, -0.03, 0.06),
+      toggleOptions: {
+        offColor: 0x4b6070,
+        offActiveColor: 0x6f8294,
+        onColor: 0x55ffee,
+        onActiveColor: 0x8dffe0,
+        emissiveColor: 0x062b3f,
+        activationThreshold: 0.95,
+        releaseThreshold: 0.35,
+        initialToggled: this.torusThicknessMode === 'thick'
+      },
+      overlay: {
+        title: 'Tube Thickness',
+        valueLabel: 'Profile',
+        hint: 'Switch between thick and thin torus profiles',
+        onValue: 'thick tube',
+        offValue: 'thin tube',
+        onAccent: '#55ffee',
+        offAccent: '#a4b8ff'
+      },
+      onToggle: (toggled) => {
+        const mode = toggled ? 'thick' : 'thin';
+        this.applyTorusThickness(mode);
+        this.recordSystemMessage(`Torus thickness: ${toggled ? 'thick tube' : 'thin tube'}`);
+      }
+    });
+
+    this.applyTorusThickness(this.torusThicknessMode);
   }
 
   setupSoundPanel() {
@@ -340,27 +382,87 @@ export class VRTorApp {
     }
   }
 
+  updateTorusGeometry({ radius, tube } = {}) {
+    if (!this.torusMesh) {
+      return;
+    }
+
+    const currentParams = this.torusGeometryParams ?? this.torusMesh.geometry?.parameters ?? {};
+    const nextRadius = radius ?? currentParams.radius ?? DEFAULT_TORUS_RADIUS;
+    const nextTube = tube ?? currentParams.tube ?? THICK_TORUS_TUBE_RADIUS;
+
+    const currentRadius = currentParams.radius ?? DEFAULT_TORUS_RADIUS;
+    const currentTube = currentParams.tube ?? THICK_TORUS_TUBE_RADIUS;
+    if (Math.abs(nextRadius - currentRadius) < 1e-5 && Math.abs(nextTube - currentTube) < 1e-5) {
+      if (this.torusLabel) {
+        const labelOffset = nextRadius - nextTube * 0.5;
+        this.torusLabel.position.set(0, 0, labelOffset);
+      }
+      return;
+    }
+
+    const radialSegments = currentParams.radialSegments ?? 64;
+    const tubularSegments = currentParams.tubularSegments ?? 128;
+    const arc = currentParams.arc ?? Math.PI * 2;
+
+    this.torusMesh.geometry?.dispose?.();
+    this.torusMesh.geometry = new THREE.TorusGeometry(nextRadius, nextTube, radialSegments, tubularSegments, arc);
+    this.torusGeometryParams = {
+      radius: nextRadius,
+      tube: nextTube,
+      radialSegments,
+      tubularSegments,
+      arc
+    };
+
+    if (this.torusLabel) {
+      const labelOffset = nextRadius - nextTube * 0.5;
+      this.torusLabel.position.set(0, 0, labelOffset);
+    }
+
+    this.createStandardTorusWaypoints();
+    this.updateTorusAudioMapping(this.audioLevels);
+  }
+
+  applyTorusThickness(mode) {
+    const normalized = mode === 'thin' ? 'thin' : 'thick';
+
+    if (this.torusThicknessControl?.setToggled) {
+      this.torusThicknessControl.setToggled(normalized === 'thick');
+    }
+
+    if (this.torusThicknessMode === normalized) {
+      return;
+    }
+
+    this.torusThicknessMode = normalized;
+    const tubeRadius = normalized === 'thin' ? THIN_TORUS_TUBE_RADIUS : THICK_TORUS_TUBE_RADIUS;
+    this.updateTorusGeometry({ tube: tubeRadius });
+  }
+
   computeTorusPoint(pha5, pha3, mag3, target = this.torusAudioPosition) {
     if (!this.torusMesh) {
       return target.set(0, 0, 0);
     }
 
     const params = this.torusGeometryParams ?? this.torusMesh.geometry?.parameters ?? {};
-    const majorRadius = params.radius ?? 0.6;
-    const tubeRadius = params.tube ?? 0.12;
+    const majorRadius = params.radius ?? DEFAULT_TORUS_RADIUS;
+    const tubeRadius = params.tube ?? THICK_TORUS_TUBE_RADIUS;
     const normalizedMag = THREE.MathUtils.clamp(mag3 ?? 0, -1.25, 1.25);
     const radialOffset = normalizedMag * tubeRadius;
 
-    const cosPha5 = Math.cos(pha5 ?? 0);
-    const sinPha5 = Math.sin(pha5 ?? 0);
-    const cosPha3 = Math.cos(pha3 ?? 0);
-    const sinPha3 = Math.sin(pha3 ?? 0);
+    const aroundAngle = pha5 ?? 0;
+    const tubeAngle = pha3 ?? 0;
 
-    const majorX = majorRadius * cosPha5;
-    const majorZ = majorRadius * sinPha5;
-    const x = majorX + radialOffset * cosPha3 * cosPha5;
-    const y = radialOffset * sinPha3;
-    const z = majorZ + radialOffset * cosPha3 * sinPha5;
+    const cosAround = Math.cos(aroundAngle);
+    const sinAround = Math.sin(aroundAngle);
+    const cosTube = Math.cos(tubeAngle);
+    const sinTube = Math.sin(tubeAngle);
+
+    const radialDistance = majorRadius + radialOffset * cosTube;
+    const x = radialDistance * cosAround;
+    const y = radialDistance * sinAround;
+    const z = radialOffset * sinTube;
 
     return target.set(x, y, z);
   }
@@ -594,7 +696,8 @@ export class VRTorApp {
     generalLines.push(
       `Single press ready: ${this.controlPanel.ready ? 'YES' : 'no'}`,
       `Toggle button: ${toggleResult?.toggled ? 'ON' : 'OFF'}`,
-      `Torus mode: ${this.torusMovable ? 'movable torus' : 'locked torus'}`
+      `Torus mode: ${this.torusMovable ? 'movable torus' : 'locked torus'}`,
+      `Torus tube: ${this.torusThicknessMode === 'thick' ? 'thick' : 'thin'}`
     );
 
     if (this.audioMonitor) {

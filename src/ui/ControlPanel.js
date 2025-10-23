@@ -179,7 +179,12 @@ export class ControlPanel {
   } = {}) {
     const options = { ...toggleOptions };
     delete options.onToggle;
+    const initialToggled = options.initialToggled;
+    delete options.initialToggled;
     const toggleButton = new PanelToggleButton({ position, ...options, onToggle: null });
+    if (initialToggled !== undefined) {
+      toggleButton.setToggled(initialToggled);
+    }
     this.group.add(toggleButton.mesh);
     toggleButton.setReady(this.ready);
 
@@ -190,24 +195,38 @@ export class ControlPanel {
       offAccent: overlay.offAccent ?? '#ff9ebd'
     };
 
+    const initialValue = toggleButton.toggled ? overlayConfig.onValue : overlayConfig.offValue;
+    const initialAccent = toggleButton.toggled ? overlayConfig.onAccent : overlayConfig.offAccent;
+
     this.addOverlayEntry({
       id,
       title: overlay.title ?? 'Toggle Button',
       valueLabel: overlay.valueLabel ?? 'State',
-      value: toggleButton.toggled ? overlayConfig.onValue : overlayConfig.offValue,
+      value: initialValue,
       hint: overlay.hint ?? 'Tap to toggle',
-      accent: toggleButton.toggled ? overlayConfig.onAccent : overlayConfig.offAccent
+      accent: initialAccent
     });
+
+    const updateOverlayState = (toggled) => {
+      const value = toggled ? overlayConfig.onValue : overlayConfig.offValue;
+      const accent = toggled ? overlayConfig.onAccent : overlayConfig.offAccent;
+      this.updateOverlayEntry(id, { value, accent });
+    };
 
     const control = {
       id,
       type: 'toggle',
       setReady: (ready) => toggleButton.setReady(ready),
+      setToggled: (value) => {
+        toggleButton.setToggled(value);
+        updateOverlayState(toggleButton.toggled);
+      },
+      get toggled() {
+        return toggleButton.toggled;
+      },
       update: (leftState, rightState, delta) => {
         const result = toggleButton.update(leftState, rightState, delta);
-        const value = result.toggled ? overlayConfig.onValue : overlayConfig.offValue;
-        const accent = result.toggled ? overlayConfig.onAccent : overlayConfig.offAccent;
-        this.updateOverlayEntry(id, { value, accent });
+        updateOverlayState(result.toggled);
         if (result.justActivated && typeof onToggle === 'function') {
           onToggle(result.toggled, result);
         }
