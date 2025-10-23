@@ -10,6 +10,21 @@ import { ControlPanel } from '../ui/ControlPanel.js';
 import { SoundPanel } from '../ui/SoundPanel.js';
 import { DoubleGrabController } from '../interactions/DoubleGrabController.js';
 
+const STANDARD_NOTE_WAYPOINTS = [
+  { label: 'C', pha5: 0, pha3: 0, mag3: 1 },
+  { label: 'C#', pha5: -Math.PI * 5 / 6, pha3: -Math.PI / 2, mag3: 1 },
+  { label: 'D', pha5: Math.PI / 3, pha3: Math.PI, mag3: 1 },
+  { label: 'D#', pha5: -Math.PI / 2, pha3: Math.PI / 2, mag3: 1 },
+  { label: 'E', pha5: Math.PI * 2 / 3, pha3: 0, mag3: 1 },
+  { label: 'F', pha5: -Math.PI / 6, pha3: -Math.PI / 2, mag3: 1 },
+  { label: 'F#', pha5: Math.PI, pha3: Math.PI, mag3: 1 },
+  { label: 'G', pha5: Math.PI / 6, pha3: Math.PI / 2, mag3: 1 },
+  { label: 'G#', pha5: -Math.PI * 2 / 3, pha3: 0, mag3: 1 },
+  { label: 'A', pha5: Math.PI / 2, pha3: -Math.PI / 2, mag3: 1 },
+  { label: 'A#', pha5: -Math.PI / 3, pha3: Math.PI, mag3: 1 },
+  { label: 'B', pha5: Math.PI * 5 / 6, pha3: Math.PI / 2, mag3: 1 }
+];
+
 export class VRTorApp {
   constructor() {
     this.scene = new THREE.Scene();
@@ -44,6 +59,14 @@ export class VRTorApp {
     this.torusGroup = null;
     this.torusController = null;
     this.torusMesh = null;
+    this.torusDataGroup = null;
+    this.torusWaypointsGroup = null;
+    this.torusAudioMarker = null;
+    this.torusAudioColor = new THREE.Color();
+    this.torusAudioEmissive = new THREE.Color();
+    this.torusAudioPosition = new THREE.Vector3();
+    this.torusWorkVector = new THREE.Vector3();
+    this.torusGeometryParams = null;
     this.torusPanel = null;
     this.soundPanel = null;
     this.audioMonitor = null;
@@ -98,6 +121,10 @@ export class VRTorApp {
     this.torusMesh = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 64, 128), this.torusMaterial);
     this.torusMesh.rotation.x = Math.PI / 2;
     this.torusGroup.add(this.torusMesh);
+    this.torusGeometryParams = {
+      radius: this.torusMesh.geometry.parameters.radius,
+      tube: this.torusMesh.geometry.parameters.tube
+    };
 
     const torusLabel = createLabelSprite('VRTOR', {
       width: 0.38,
@@ -113,6 +140,29 @@ export class VRTorApp {
     torusLabel.material.depthTest = false;
     torusLabel.material.depthWrite = false;
     this.torusMesh.add(torusLabel);
+
+    this.torusDataGroup = new THREE.Group();
+    this.torusMesh.add(this.torusDataGroup);
+
+    const torusAudioGeometry = new THREE.SphereGeometry(0.065, 28, 18);
+    const torusAudioMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0xff72c6),
+      emissive: new THREE.Color(0x1a0820),
+      emissiveIntensity: 0.6,
+      metalness: 0.12,
+      roughness: 0.35,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false
+    });
+    this.torusAudioMarker = new THREE.Mesh(torusAudioGeometry, torusAudioMaterial);
+    this.torusAudioMarker.visible = false;
+    this.torusAudioMarker.renderOrder = 12;
+    this.torusAudioMarker.castShadow = false;
+    this.torusAudioMarker.receiveShadow = false;
+    this.torusDataGroup.add(this.torusAudioMarker);
+
+    this.createStandardTorusWaypoints();
 
     this.torusController = new DoubleGrabController(this.torusGroup, {
       proximity: 0.075,
@@ -198,7 +248,7 @@ export class VRTorApp {
 
     this.controlPanel.addToggleButton({
       id: 'toggle',
-      position: new THREE.Vector3(-0.15, -0.03, 0.06),
+      position: new THREE.Vector3(0.2, -0.03, 0.06),
       toggleOptions: {
         offColor: 0xff5fa2,
         offActiveColor: 0xff8cc4,
@@ -288,6 +338,132 @@ export class VRTorApp {
     } catch (error) {
       handleError(error);
     }
+  }
+
+  computeTorusPoint(pha5, pha3, mag3, target = this.torusAudioPosition) {
+    if (!this.torusMesh) {
+      return target.set(0, 0, 0);
+    }
+
+    const params = this.torusGeometryParams ?? this.torusMesh.geometry?.parameters ?? {};
+    const majorRadius = params.radius ?? 0.6;
+    const tubeRadius = params.tube ?? 0.12;
+    const normalizedMag = THREE.MathUtils.clamp(mag3 ?? 0, -1.25, 1.25);
+    const radialOffset = normalizedMag * tubeRadius;
+
+    const cosPha5 = Math.cos(pha5 ?? 0);
+    const sinPha5 = Math.sin(pha5 ?? 0);
+    const cosPha3 = Math.cos(pha3 ?? 0);
+    const sinPha3 = Math.sin(pha3 ?? 0);
+
+    const majorX = majorRadius * cosPha5;
+    const majorZ = majorRadius * sinPha5;
+    const x = majorX + radialOffset * cosPha3 * cosPha5;
+    const y = radialOffset * sinPha3;
+    const z = majorZ + radialOffset * cosPha3 * sinPha5;
+
+    return target.set(x, y, z);
+  }
+
+  createStandardTorusWaypoints() {
+    if (!this.torusDataGroup) {
+      return;
+    }
+
+    if (this.torusWaypointsGroup) {
+      this.torusDataGroup.remove(this.torusWaypointsGroup);
+      this.torusWaypointsGroup.traverse((child) => {
+        if (child.isMesh) {
+          child.geometry?.dispose?.();
+          child.material?.dispose?.();
+        }
+        if (child.isSprite) {
+          child.material?.map?.dispose?.();
+          child.material?.dispose?.();
+        }
+      });
+    }
+
+    this.torusWaypointsGroup = new THREE.Group();
+    this.torusWaypointsGroup.renderOrder = 11;
+    this.torusDataGroup.add(this.torusWaypointsGroup);
+
+    STANDARD_NOTE_WAYPOINTS.forEach((waypoint) => {
+      const { label, pha5, pha3, mag3 = 1 } = waypoint;
+
+      const hue = THREE.MathUtils.euclideanModulo((pha5 / (Math.PI * 2)) + 1, 1);
+      const markerGeometry = new THREE.TetrahedronGeometry(0.05);
+      const markerMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(hue, 0.68, 0.62),
+        emissive: new THREE.Color().setHSL(hue, 0.35, 0.22),
+        emissiveIntensity: 0.5,
+        flatShading: true,
+        metalness: 0.3,
+        roughness: 0.5
+      });
+
+      const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+      marker.castShadow = false;
+      marker.receiveShadow = false;
+      marker.renderOrder = 12;
+      marker.userData.waypoint = waypoint;
+      this.computeTorusPoint(pha5, pha3, mag3, this.torusWorkVector);
+      marker.position.copy(this.torusWorkVector);
+
+      const labelSprite = createLabelSprite(label, {
+        width: 0.22,
+        fontSize: 180,
+        color: '#f3f7ff',
+        strokeStyle: 'rgba(0, 0, 0, 0.65)',
+        renderOrder: 18,
+        depthTest: false
+      });
+      labelSprite.material.depthTest = false;
+      labelSprite.material.depthWrite = false;
+      const labelMag = Math.min(mag3 + 0.32, 1.15);
+      this.computeTorusPoint(pha5, pha3, labelMag, labelSprite.position);
+
+      this.torusWaypointsGroup.add(marker);
+      this.torusWaypointsGroup.add(labelSprite);
+    });
+  }
+
+  updateTorusAudioMapping(audioLevels = {}) {
+    if (!this.torusAudioMarker || !this.torusMesh) {
+      return;
+    }
+
+    const minRms = this.audioMonitor?.options?.pcd?.minRms ?? 0.0025;
+    const rms = audioLevels.rms ?? 0;
+    const dft = audioLevels.dft ?? null;
+
+    if (!dft || rms < minRms) {
+      this.torusAudioMarker.visible = false;
+      return;
+    }
+
+    const amplitudes = dft.amplitudes ?? [];
+    const phases = dft.phases ?? [];
+    const pha5 = phases[5];
+    const pha3 = phases[3];
+    let mag3 = amplitudes[3];
+
+    if (!Number.isFinite(pha5) || !Number.isFinite(pha3) || !Number.isFinite(mag3)) {
+      this.torusAudioMarker.visible = false;
+      return;
+    }
+
+    mag3 = THREE.MathUtils.clamp(mag3, 0, 1);
+
+    const position = this.computeTorusPoint(pha5, pha3, mag3);
+    this.torusAudioMarker.position.copy(position);
+
+    const hue = THREE.MathUtils.euclideanModulo((pha5 / (Math.PI * 2)) + 0.5, 1);
+    this.torusAudioColor.setHSL(hue, 0.78, 0.62);
+    this.torusAudioMarker.material.color.copy(this.torusAudioColor);
+    this.torusAudioEmissive.setHSL(hue, 0.5, 0.25);
+    this.torusAudioMarker.material.emissive.copy(this.torusAudioEmissive);
+    this.torusAudioMarker.visible = true;
   }
 
   setTorusMovable(enabled) {
@@ -387,6 +563,7 @@ export class VRTorApp {
       audioLevels = this.audioMonitor.update();
       this.audioLevels = audioLevels;
       this.soundPanel?.updateMeter(audioLevels);
+      this.updateTorusAudioMapping(audioLevels);
     } else if (this.soundPanel) {
       audioLevels = {
         level: 0,
@@ -399,6 +576,7 @@ export class VRTorApp {
       };
       this.audioLevels = audioLevels;
       this.soundPanel.updateMeter(audioLevels);
+      this.updateTorusAudioMapping(audioLevels);
     }
 
     const generalLines = [];
