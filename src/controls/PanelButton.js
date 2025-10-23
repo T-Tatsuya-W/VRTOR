@@ -20,7 +20,8 @@ export class PanelButton {
     depthBias = 0.003,
     metalness = 0.08,
     roughness = 0.85,
-    flatShading = true
+    flatShading = true,
+    inputDepthScale = 2
   } = {}) {
     this.colors = {
       base: new THREE.Color(baseColor),
@@ -87,7 +88,8 @@ export class PanelButton {
       ready: false,
       contactPadding,
       depthBias,
-      halfExtents
+      halfExtents,
+      inputDepthScale: inputDepthScale > 0 ? inputDepthScale : 1
     };
   }
 
@@ -129,7 +131,12 @@ export class PanelButton {
 
   update(leftState, rightState, delta) {
     this.mesh.updateWorldMatrix(true, false);
-    const targetDepth = computeButtonTargetDepth(this.mesh, this.state, [leftState, rightState]);
+    const rawTargetDepth = computeButtonTargetDepth(this.mesh, this.state, [leftState, rightState]);
+    const targetDepth = THREE.MathUtils.clamp(
+      rawTargetDepth * this.state.inputDepthScale,
+      0,
+      this.state.maxPressDepth
+    );
     this.state.targetDepth = targetDepth;
     const goingDeeper = targetDepth > this.state.currentDepth;
     const damping = Math.max(goingDeeper ? this.state.pressDamping : this.state.releaseDamping, 0);
