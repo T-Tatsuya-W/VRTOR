@@ -8,16 +8,49 @@ const DEFAULT_PCD_OPTIONS = {
   pcdThreshold: 0.005,
   pcdNormalize: 1.0,
   refA4: 440,
-  minRms: 0.0025
+  minRms: 0.001
 };
 
+const DEFAULT_FFT_SIZE = 16384;
+const DEFAULT_SMOOTHING = 0.6;
+
+const MIN_FFT_SIZE = 32;
+const MAX_FFT_SIZE = 32768;
+
+function sanitizeFftSize(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_FFT_SIZE;
+  }
+  const clamped = Math.min(MAX_FFT_SIZE, Math.max(MIN_FFT_SIZE, Math.floor(value)));
+  const exponent = Math.round(Math.log2(clamped));
+  const size = 2 ** Math.min(Math.max(exponent, 5), 15);
+  return Math.min(MAX_FFT_SIZE, Math.max(MIN_FFT_SIZE, size));
+}
+
+function normalizePcdOptions(options) {
+  const normalized = { ...DEFAULT_PCD_OPTIONS, ...(options || {}) };
+  normalized.minHz = Math.max(0, normalized.minHz);
+  normalized.maxHz = Math.max(normalized.minHz + 1, normalized.maxHz);
+  normalized.pcdThreshold = Math.max(0, normalized.pcdThreshold);
+  normalized.pcdNormalize = Math.max(0.1, normalized.pcdNormalize);
+  normalized.refA4 = Math.max(1, normalized.refA4);
+  normalized.minRms = Math.max(0, normalized.minRms);
+  return normalized;
+}
+
 export class AudioVolumeMonitor {
-  constructor({ fftSize = 1024, smoothing = 0.7, normalization = 4, pcdOptions = {} } = {}) {
+  constructor({ fftSize = DEFAULT_FFT_SIZE, smoothing = DEFAULT_SMOOTHING, normalization = 4, pcdOptions = {} } = {}) {
+    const sanitizedFftSize = sanitizeFftSize(fftSize);
+    const smoothingValue = THREE.MathUtils.clamp(
+      Number.isFinite(smoothing) ? smoothing : DEFAULT_SMOOTHING,
+      0,
+      0.99
+    );
     this.options = {
-      fftSize,
-      smoothing: THREE.MathUtils.clamp(smoothing, 0, 0.99),
+      fftSize: sanitizedFftSize,
+      smoothing: smoothingValue,
       normalization: normalization > 0 ? normalization : 4,
-      pcd: { ...DEFAULT_PCD_OPTIONS, ...(pcdOptions || {}) }
+      pcd: normalizePcdOptions(pcdOptions)
     };
     this.state = {
       status: 'idle',
@@ -36,6 +69,7 @@ export class AudioVolumeMonitor {
 
     this.pitchComputer = new PitchClassComputer();
     this.pcdValues = new Float32Array(12);
+    this.rawPcdValues = new Float32Array(12);
     this.dftAmplitudes = new Float32Array(7);
     this.dftPhases = new Float32Array(7);
   }
@@ -80,9 +114,15 @@ export class AudioVolumeMonitor {
         throw new Error('Web Audio API is not available');
       }
 
-      this.audioContext = new AudioContextConstructor();
+      this.audioContext = new AudioContextConstructor({ latencyHint: 'interactive' });
       this.sampleRate = this.audioContext.sampleRate;
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
       this.stream = stream;
       this.source = this.audioContext.createMediaStreamSource(stream);
       this.analyser = this.audioContext.createAnalyser();
@@ -116,6 +156,7 @@ export class AudioVolumeMonitor {
   update() {
     if (this.state.status !== 'active' || !this.analyser || !this.dataArray || !this.frequencyData) {
       this.pcdValues.fill(0);
+      this.rawPcdValues.fill(0);
       this.dftAmplitudes.fill(0);
       this.dftPhases.fill(0);
       return {
@@ -139,12 +180,13 @@ export class AudioVolumeMonitor {
 
     const rms = Math.sqrt(sumSquares / this.dataArray.length);
     const normalized = Math.min(1, rms * this.options.normalization);
-    const smoothing = this.options.smoothing;
+    const meterSmoothing = this.options.smoothing;
 
-    this.state.level = smoothing * this.state.level + (1 - smoothing) * normalized;
-    this.state.rms = smoothing * this.state.rms + (1 - smoothing) * rms;
+    this.state.level = meterSmoothing * this.state.level + (1 - meterSmoothing) * normalized;
+    this.state.rms = meterSmoothing * this.state.rms + (1 - meterSmoothing) * rms;
 
     const pcdOptions = this.options.pcd;
+    let rawPcd;
     if (this.state.rms >= pcdOptions.minRms) {
       this.analyser.getFloatFrequencyData(this.frequencyData);
       const len = this.frequencyData.length;
@@ -157,8 +199,23 @@ export class AudioVolumeMonitor {
         }
       }
       this.sampleRate = this.audioContext?.sampleRate ?? this.sampleRate;
-      const computed = this.pitchComputer.compute(this.magnitudeData, this.sampleRate, pcdOptions);
-      this.pcdValues.set(computed);
+      rawPcd = this.pitchComputer.compute(this.magnitudeData, this.sampleRate, pcdOptions);
+    } else {
+      this.rawPcdValues.fill(0);
+      rawPcd = this.rawPcdValues;
+    }
+
+    if (rawPcd) {
+      this.rawPcdValues.set(rawPcd);
+      const pcdSmoothing = THREE.MathUtils.clamp(this.options.smoothing, 0, 0.999);
+      if (pcdSmoothing === 0) {
+        this.pcdValues.set(this.rawPcdValues);
+      } else {
+        const blend = 1 - pcdSmoothing;
+        for (let i = 0; i < this.pcdValues.length; i += 1) {
+          this.pcdValues[i] = pcdSmoothing * this.pcdValues[i] + blend * this.rawPcdValues[i];
+        }
+      }
       const dft = pcdToFrequencyDomain(this.pcdValues);
       this.dftAmplitudes.set(dft.amplitudes);
       this.dftPhases.set(dft.phases);
