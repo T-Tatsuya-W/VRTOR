@@ -47,7 +47,15 @@ export class VRTorApp {
     this.torusPanel = null;
     this.soundPanel = null;
     this.audioMonitor = null;
-    this.audioLevels = { level: 0, rms: 0 };
+    this.audioLevels = {
+      level: 0,
+      rms: 0,
+      pcd: new Float32Array(12),
+      dft: {
+        amplitudes: new Float32Array(7),
+        phases: new Float32Array(7)
+      }
+    };
     this.lastAudioMonitorStatus = null;
     this.lastAudioErrorMessage = null;
 
@@ -213,34 +221,6 @@ export class VRTorApp {
       }
     });
 
-    this.controlPanel.addThrottleLever({
-      id: 'throttle',
-      position: new THREE.Vector3(0.18, 0.12, 0.065),
-      leverOptions: {
-        initialValue: 0.4
-      },
-      overlay: {
-        title: 'Throttle Lever',
-        valueLabel: 'Value',
-        hint: 'Grab the handle and move to choose a value',
-        accent: '#00ffcc'
-      }
-    });
-
-    this.controlPanel.addRotarySelector({
-      id: 'rotary',
-      position: new THREE.Vector3(0.5, 0.02, 0.06),
-      labels: ['Apple', 'Banana', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig'],
-      overlay: {
-        title: 'Gear Selector',
-        valueLabel: 'Selected',
-        hint: 'Rotate the cog to browse the list',
-        accent: '#ffd27a'
-      },
-      onChange: (label) => {
-        this.recordSystemMessage(`Selector set to: ${label}`);
-      }
-    });
   }
 
   configureTorusPanel() {
@@ -362,8 +342,6 @@ export class VRTorApp {
     const panelStatus = this.controlPanel.update(leftState, rightState, delta);
     const controlResults = panelStatus.controls ?? {};
     const toggleResult = controlResults.toggle ?? null;
-    const throttleResult = controlResults.throttle ?? null;
-    const rotaryResult = controlResults.rotary ?? null;
 
     const torusPanelStatus = this.torusPanel.update(leftState, rightState, delta);
     const soundPanelStatus = this.soundPanel ? this.soundPanel.update(leftState, rightState) : null;
@@ -377,7 +355,15 @@ export class VRTorApp {
       }
     }
 
-    let audioLevels = { level: 0, rms: 0 };
+    let audioLevels = {
+      level: 0,
+      rms: 0,
+      pcd: new Float32Array(12),
+      dft: {
+        amplitudes: new Float32Array(7),
+        phases: new Float32Array(7)
+      }
+    };
     if (this.audioMonitor) {
       const monitorStatus = this.audioMonitor.getStatus();
       const errorMessage = this.audioMonitor.getErrorMessage();
@@ -402,13 +388,18 @@ export class VRTorApp {
       this.audioLevels = audioLevels;
       this.soundPanel?.updateMeter(audioLevels);
     } else if (this.soundPanel) {
-      audioLevels = { level: 0, rms: 0 };
+      audioLevels = {
+        level: 0,
+        rms: 0,
+        pcd: new Float32Array(12),
+        dft: {
+          amplitudes: new Float32Array(7),
+          phases: new Float32Array(7)
+        }
+      };
       this.audioLevels = audioLevels;
       this.soundPanel.updateMeter(audioLevels);
     }
-
-    const throttlePercent = throttleResult ? Math.round(throttleResult.value * 100) : 0;
-    const rotaryLabel = rotaryResult?.selectedLabel ?? '—';
 
     const generalLines = [];
     const activePinches = Object.entries(this.pinchTelemetry).filter(([, data]) => data && data.position);
@@ -425,8 +416,6 @@ export class VRTorApp {
     generalLines.push(
       `Single press ready: ${this.controlPanel.ready ? 'YES' : 'no'}`,
       `Toggle button: ${toggleResult?.toggled ? 'ON' : 'OFF'}`,
-      `Throttle lever: ${throttlePercent}% (${(throttleResult?.value ?? 0).toFixed(2)})`,
-      `Gear selector: ${rotaryLabel}`,
       `Torus mode: ${this.torusMovable ? 'movable torus' : 'locked torus'}`
     );
 
@@ -436,6 +425,24 @@ export class VRTorApp {
         `Microphone status: ${this.audioMonitor.getStatusDescription()}`,
         `Microphone level: ${micPercent}% (RMS ${this.audioLevels.rms.toFixed(3)})`
       );
+    }
+
+    const pitchClasses = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const pcdValues = this.audioLevels?.pcd;
+    if (pcdValues?.length === pitchClasses.length) {
+      let peakIndex = -1;
+      let peakValue = 0;
+      for (let i = 0; i < pcdValues.length; i += 1) {
+        if (pcdValues[i] > peakValue) {
+          peakValue = pcdValues[i];
+          peakIndex = i;
+        }
+      }
+      if (peakIndex >= 0 && peakValue > 0) {
+        generalLines.push(
+          `Dominant pitch class: ${pitchClasses[peakIndex]} ${(peakValue * 100).toFixed(1)}%`
+        );
+      }
     }
 
     const statusLines = [];
@@ -450,13 +457,6 @@ export class VRTorApp {
     }
     if (soundPanelStatus?.grabbing) {
       statusLines.push('Moving sound panel…');
-    }
-    if (throttleResult?.activeHand) {
-      const throttleHandLabel = throttleResult.activeHand === 'L' ? 'left' : 'right';
-      statusLines.push(`Adjusting throttle lever (${throttleHandLabel} hand)…`);
-    }
-    if (rotaryResult?.grabbing) {
-      statusLines.push('Rotating gear selector…');
     }
     if (this.torusMovable && torusInteraction?.grabbing) {
       statusLines.push('Manipulating torus…', `Scale ×${this.torusGroup.scale.x.toFixed(2)}`);
