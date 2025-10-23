@@ -72,7 +72,9 @@ export class SoundPanel {
     this.texture.magFilter = THREE.LinearFilter;
 
     const graphMaterial = new THREE.MeshBasicMaterial({ map: this.texture });
-    graphMaterial.depthTest = false;
+    // Respect depth testing so this overlay is occluded by objects (e.g. buttons)
+    // that sit in front of the sound panel while still avoiding depth writes.
+    graphMaterial.depthTest = true;
     graphMaterial.depthWrite = false;
     this.graphMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.62), graphMaterial);
     this.graphMesh.position.set(0, 0, 0.004);
